@@ -76,19 +76,19 @@ export function FlatbedTrailer({ spec, showWheels = true }: TrailerProps) {
   return (
     <group ref={groupRef}>
       {/* Main deck */}
-      <mesh position={[0, spec.deckHeight * SCALE, 0]}>
+      <mesh position={[0, spec.deckHeight * SCALE, 0]} castShadow receiveShadow>
         <boxGeometry args={[spec.deckLength * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Frame rails */}
-      <mesh position={[0, (spec.deckHeight - 0.5) * SCALE, (spec.deckWidth / 2 - 0.3) * SCALE]}>
+      <mesh position={[0, (spec.deckHeight - 0.5) * SCALE, (spec.deckWidth / 2 - 0.3) * SCALE]} castShadow receiveShadow>
         <boxGeometry args={[spec.deckLength * SCALE, 0.8 * SCALE, 0.3 * SCALE]} />
-        <meshStandardMaterial color="#1a1a1a" />
+        <meshStandardMaterial color="#1a1a1a" metalness={0.4} roughness={0.6} />
       </mesh>
-      <mesh position={[0, (spec.deckHeight - 0.5) * SCALE, -(spec.deckWidth / 2 - 0.3) * SCALE]}>
+      <mesh position={[0, (spec.deckHeight - 0.5) * SCALE, -(spec.deckWidth / 2 - 0.3) * SCALE]} castShadow receiveShadow>
         <boxGeometry args={[spec.deckLength * SCALE, 0.8 * SCALE, 0.3 * SCALE]} />
-        <meshStandardMaterial color="#1a1a1a" />
+        <meshStandardMaterial color="#1a1a1a" metalness={0.4} roughness={0.6} />
       </mesh>
 
       {/* Wheels */}
@@ -116,34 +116,36 @@ export function StepDeckTrailer({ spec, showWheels = true }: TrailerProps) {
   return (
     <group ref={groupRef}>
       {/* Front raised deck */}
-      <mesh position={[(spec.deckLength / 2 - frontDeckLength / 2) * SCALE, 5 * SCALE, 0]}>
+      <mesh position={[(spec.deckLength / 2 - frontDeckLength / 2) * SCALE, 5 * SCALE, 0]} castShadow receiveShadow>
         <boxGeometry args={[frontDeckLength * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Main lower deck */}
-      <mesh position={[-(frontDeckLength / 2) * SCALE, spec.deckHeight * SCALE, 0]}>
+      <mesh position={[-(frontDeckLength / 2) * SCALE, spec.deckHeight * SCALE, 0]} castShadow receiveShadow>
         <boxGeometry args={[mainDeckLength * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Step transition */}
       <mesh
         position={[(spec.deckLength / 2 - frontDeckLength - 1) * SCALE, 4.25 * SCALE, 0]}
         rotation={[0, 0, Math.PI / 6]}
+        castShadow
+        receiveShadow
       >
         <boxGeometry args={[3 * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Frame rails */}
-      <mesh position={[0, (spec.deckHeight - 0.5) * SCALE, (spec.deckWidth / 2 - 0.3) * SCALE]}>
+      <mesh position={[0, (spec.deckHeight - 0.5) * SCALE, (spec.deckWidth / 2 - 0.3) * SCALE]} castShadow receiveShadow>
         <boxGeometry args={[spec.deckLength * SCALE, 0.8 * SCALE, 0.3 * SCALE]} />
-        <meshStandardMaterial color="#1a1a1a" />
+        <meshStandardMaterial color="#1a1a1a" metalness={0.4} roughness={0.6} />
       </mesh>
-      <mesh position={[0, (spec.deckHeight - 0.5) * SCALE, -(spec.deckWidth / 2 - 0.3) * SCALE]}>
+      <mesh position={[0, (spec.deckHeight - 0.5) * SCALE, -(spec.deckWidth / 2 - 0.3) * SCALE]} castShadow receiveShadow>
         <boxGeometry args={[spec.deckLength * SCALE, 0.8 * SCALE, 0.3 * SCALE]} />
-        <meshStandardMaterial color="#1a1a1a" />
+        <meshStandardMaterial color="#1a1a1a" metalness={0.4} roughness={0.6} />
       </mesh>
 
       {/* Wheels */}
@@ -168,34 +170,36 @@ export function RGNTrailer({ spec, showWheels = true }: TrailerProps) {
   return (
     <group ref={groupRef}>
       {/* Gooseneck (raised front) */}
-      <mesh position={[(spec.deckLength / 2 + gooseneckLength / 2 - 2) * SCALE, 4.5 * SCALE, 0]}>
+      <mesh position={[(spec.deckLength / 2 + gooseneckLength / 2 - 2) * SCALE, 4.5 * SCALE, 0]} castShadow receiveShadow>
         <boxGeometry args={[gooseneckLength * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Main well deck (very low) */}
-      <mesh position={[0, spec.deckHeight * SCALE, 0]}>
+      <mesh position={[0, spec.deckHeight * SCALE, 0]} castShadow receiveShadow>
         <boxGeometry args={[spec.deckLength * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Transition ramp */}
       <mesh
         position={[(spec.deckLength / 2 - 1) * SCALE, 3.25 * SCALE, 0]}
         rotation={[0, 0, -Math.PI / 4]}
+        castShadow
+        receiveShadow
       >
         <boxGeometry args={[4 * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Side rails */}
-      <mesh position={[0, (spec.deckHeight + 0.5) * SCALE, (spec.deckWidth / 2) * SCALE]}>
+      <mesh position={[0, (spec.deckHeight + 0.5) * SCALE, (spec.deckWidth / 2) * SCALE]} castShadow receiveShadow>
         <boxGeometry args={[spec.deckLength * SCALE, 0.5 * SCALE, 0.2 * SCALE]} />
-        <meshStandardMaterial color="#1a1a1a" />
+        <meshStandardMaterial color="#1a1a1a" metalness={0.4} roughness={0.6} />
       </mesh>
-      <mesh position={[0, (spec.deckHeight + 0.5) * SCALE, -(spec.deckWidth / 2) * SCALE]}>
+      <mesh position={[0, (spec.deckHeight + 0.5) * SCALE, -(spec.deckWidth / 2) * SCALE]} castShadow receiveShadow>
         <boxGeometry args={[spec.deckLength * SCALE, 0.5 * SCALE, 0.2 * SCALE]} />
-        <meshStandardMaterial color="#1a1a1a" />
+        <meshStandardMaterial color="#1a1a1a" metalness={0.4} roughness={0.6} />
       </mesh>
 
       {/* Wheels */}
@@ -220,33 +224,37 @@ export function LowboyTrailer({ spec, showWheels = true }: TrailerProps) {
   return (
     <group ref={groupRef}>
       {/* Gooseneck */}
-      <mesh position={[(spec.deckLength / 2 + gooseneckLength / 2) * SCALE, 4 * SCALE, 0]}>
+      <mesh position={[(spec.deckLength / 2 + gooseneckLength / 2) * SCALE, 4 * SCALE, 0]} castShadow receiveShadow>
         <boxGeometry args={[gooseneckLength * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Main well deck (lowest) */}
-      <mesh position={[0, spec.deckHeight * SCALE, 0]}>
+      <mesh position={[0, spec.deckHeight * SCALE, 0]} castShadow receiveShadow>
         <boxGeometry args={[spec.deckLength * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Front transition */}
       <mesh
         position={[(spec.deckLength / 2) * SCALE, 2.75 * SCALE, 0]}
         rotation={[0, 0, -Math.PI / 4]}
+        castShadow
+        receiveShadow
       >
         <boxGeometry args={[4 * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Rear transition */}
       <mesh
         position={[-(spec.deckLength / 2 + 2) * SCALE, 2.75 * SCALE, 0]}
         rotation={[0, 0, Math.PI / 4]}
+        castShadow
+        receiveShadow
       >
         <boxGeometry args={[4 * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Wheels - split axle design */}
@@ -274,39 +282,43 @@ export function DoubleDropTrailer({ spec, showWheels = true }: TrailerProps) {
   return (
     <group ref={groupRef}>
       {/* Front raised section */}
-      <mesh position={[(spec.deckLength / 2 - frontDeckLength / 2) * SCALE, 4.5 * SCALE, 0]}>
+      <mesh position={[(spec.deckLength / 2 - frontDeckLength / 2) * SCALE, 4.5 * SCALE, 0]} castShadow receiveShadow>
         <boxGeometry args={[frontDeckLength * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Middle well (lowest) */}
-      <mesh position={[0, spec.deckHeight * SCALE, 0]}>
+      <mesh position={[0, spec.deckHeight * SCALE, 0]} castShadow receiveShadow>
         <boxGeometry args={[wellLength * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Rear raised section */}
-      <mesh position={[-(spec.deckLength / 2 - rearDeckLength / 2) * SCALE, 4 * SCALE, 0]}>
+      <mesh position={[-(spec.deckLength / 2 - rearDeckLength / 2) * SCALE, 4 * SCALE, 0]} castShadow receiveShadow>
         <boxGeometry args={[rearDeckLength * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Front transition */}
       <mesh
         position={[(spec.deckLength / 2 - frontDeckLength - 1) * SCALE, 3.25 * SCALE, 0]}
         rotation={[0, 0, Math.PI / 5]}
+        castShadow
+        receiveShadow
       >
         <boxGeometry args={[3.5 * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Rear transition */}
       <mesh
         position={[-(spec.deckLength / 2 - rearDeckLength - 1) * SCALE, 3 * SCALE, 0]}
         rotation={[0, 0, -Math.PI / 5]}
+        castShadow
+        receiveShadow
       >
         <boxGeometry args={[3.5 * SCALE, 0.3 * SCALE, spec.deckWidth * SCALE]} />
-        <meshStandardMaterial color={spec.color} />
+        <meshStandardMaterial color={spec.color} metalness={0.2} roughness={0.7} />
       </mesh>
 
       {/* Wheels */}
@@ -331,29 +343,29 @@ function WheelSet({ position }: { position: [number, number, number] }) {
   return (
     <group position={position}>
       {/* Left side dual wheels */}
-      <mesh position={[0, 0, 3.5]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0, 3.5]} rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
         <cylinderGeometry args={[wheelRadius, wheelRadius, wheelWidth, 16]} />
-        <meshStandardMaterial color="#1a1a1a" />
+        <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
       </mesh>
-      <mesh position={[0, 0, 4.3]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0, 4.3]} rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
         <cylinderGeometry args={[wheelRadius, wheelRadius, wheelWidth, 16]} />
-        <meshStandardMaterial color="#1a1a1a" />
+        <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
       </mesh>
 
       {/* Right side dual wheels */}
-      <mesh position={[0, 0, -3.5]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0, -3.5]} rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
         <cylinderGeometry args={[wheelRadius, wheelRadius, wheelWidth, 16]} />
-        <meshStandardMaterial color="#1a1a1a" />
+        <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
       </mesh>
-      <mesh position={[0, 0, -4.3]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0, -4.3]} rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
         <cylinderGeometry args={[wheelRadius, wheelRadius, wheelWidth, 16]} />
-        <meshStandardMaterial color="#1a1a1a" />
+        <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
       </mesh>
 
       {/* Axle */}
-      <mesh rotation={[Math.PI / 2, 0, 0]}>
+      <mesh rotation={[Math.PI / 2, 0, 0]} castShadow>
         <cylinderGeometry args={[0.3, 0.3, 9, 8]} />
-        <meshStandardMaterial color="#333" />
+        <meshStandardMaterial color="#333" metalness={0.5} roughness={0.5} />
       </mesh>
     </group>
   )
@@ -366,19 +378,19 @@ function LandingGear({ position }: { position: [number, number, number] }) {
   return (
     <group position={position}>
       {/* Left leg */}
-      <mesh position={[0, -1, 2]}>
+      <mesh position={[0, -1, 2]} castShadow receiveShadow>
         <boxGeometry args={[0.3, 4, 0.3]} />
-        <meshStandardMaterial color="#333" />
+        <meshStandardMaterial color="#333" metalness={0.4} roughness={0.6} />
       </mesh>
       {/* Right leg */}
-      <mesh position={[0, -1, -2]}>
+      <mesh position={[0, -1, -2]} castShadow receiveShadow>
         <boxGeometry args={[0.3, 4, 0.3]} />
-        <meshStandardMaterial color="#333" />
+        <meshStandardMaterial color="#333" metalness={0.4} roughness={0.6} />
       </mesh>
       {/* Cross bar */}
-      <mesh position={[0, -2.5, 0]}>
+      <mesh position={[0, -2.5, 0]} castShadow receiveShadow>
         <boxGeometry args={[0.3, 0.3, 4]} />
-        <meshStandardMaterial color="#333" />
+        <meshStandardMaterial color="#333" metalness={0.4} roughness={0.6} />
       </mesh>
     </group>
   )

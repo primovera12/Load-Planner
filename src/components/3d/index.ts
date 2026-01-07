@@ -5,6 +5,8 @@ export type { ViewMode } from './load-scene'
 export { Trailer, TRAILER_SPECS } from './trailer-models'
 export type { TrailerSpec } from './trailer-models'
 
+export { Tractor } from './tractor-model'
+
 export { Cargo, CargoGroup, CenterOfGravity } from './cargo'
 export type { CargoItem } from './cargo'
 

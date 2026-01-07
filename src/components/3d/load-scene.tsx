@@ -2,11 +2,13 @@
 
 import { Suspense, useRef, useEffect } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { OrbitControls, PerspectiveCamera, Environment } from '@react-three/drei'
+import { OrbitControls, PerspectiveCamera, Environment, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
 import { Trailer, TRAILER_SPECS } from './trailer-models'
+import { Tractor } from './tractor-model'
 import { CargoGroup, CenterOfGravity, CargoItem } from './cargo'
 import { LegalLimits, HeightRuler } from './legal-limits'
+import { MeasurementTool, MeasurementClickPlane, type Measurement } from './measurement-tool'
 
 export type ViewMode = '3d' | 'front' | 'side' | 'top'
 
@@ -18,6 +20,16 @@ interface LoadSceneProps {
   showDimensions?: boolean
   showLabels?: boolean
   showCenterOfGravity?: boolean
+  showTractor?: boolean
+  selectedCargoId?: string | null
+  onCargoSelect?: (id: string | null) => void
+  onCargoPositionChange?: (id: string, position: [number, number, number]) => void
+  enableDrag?: boolean
+  // Measurement tool props
+  measureMode?: boolean
+  measurements?: Measurement[]
+  pendingMeasurePoint?: [number, number, number] | null
+  onMeasureClick?: (point: [number, number, number]) => void
 }
 
 /**
@@ -79,6 +91,15 @@ function SceneContent({
   showDimensions = true,
   showLabels = true,
   showCenterOfGravity = true,
+  showTractor = true,
+  selectedCargoId,
+  onCargoSelect,
+  onCargoPositionChange,
+  enableDrag = true,
+  measureMode = false,
+  measurements = [],
+  pendingMeasurePoint = null,
+  onMeasureClick,
 }: LoadSceneProps) {
   const spec = TRAILER_SPECS[trailerType] || TRAILER_SPECS.flatbed
 
@@ -87,25 +108,44 @@ function SceneContent({
 
   // Calculate total cargo height
   const maxCargoHeight = Math.max(...cargo.map((c) => c.height), 0)
-  const totalHeight = spec.deckHeight + maxCargoHeight
 
   return (
     <>
-      {/* Lighting */}
-      <ambientLight intensity={0.4} />
+      {/* Lighting - improved for shadows */}
+      <ambientLight intensity={0.3} />
       <directionalLight
-        position={[50, 50, 25]}
-        intensity={1}
+        position={[50, 80, 30]}
+        intensity={1.2}
         castShadow
-        shadow-mapSize={[1024, 1024]}
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+        shadow-camera-far={200}
+        shadow-camera-left={-80}
+        shadow-camera-right={80}
+        shadow-camera-top={80}
+        shadow-camera-bottom={-80}
+        shadow-bias={-0.0001}
       />
-      <directionalLight position={[-30, 30, -25]} intensity={0.3} />
+      <directionalLight position={[-30, 30, -25]} intensity={0.4} />
+      <hemisphereLight args={['#87ceeb', '#362907', 0.3]} />
 
       {/* Environment for reflections */}
       <Environment preset="city" />
 
+      {/* Ground shadow plane */}
+      <ContactShadows
+        position={[0, -0.01, 0]}
+        opacity={0.4}
+        scale={150}
+        blur={2}
+        far={100}
+      />
+
       {/* Camera controller */}
       <CameraController viewMode={viewMode} trailerLength={spec.deckLength} />
+
+      {/* Tractor/Cab */}
+      {showTractor && <Tractor trailerType={trailerType} />}
 
       {/* Trailer */}
       <Trailer type={trailerType} />
@@ -116,6 +156,12 @@ function SceneContent({
         deckHeight={spec.deckHeight}
         showLabels={showLabels}
         showDimensions={showDimensions}
+        selectedId={selectedCargoId}
+        onSelect={onCargoSelect}
+        onPositionChange={onCargoPositionChange}
+        deckLength={spec.deckLength}
+        deckWidth={spec.deckWidth}
+        enableDrag={enableDrag && !measureMode}
       />
 
       {/* Center of gravity */}
@@ -138,6 +184,24 @@ function SceneContent({
 
       {/* Height ruler */}
       <HeightRuler maxHeight={16} position={[-spec.deckLength / 2 - 8, 0, 0]} />
+
+      {/* Measurement tool */}
+      <MeasurementTool
+        enabled={measureMode}
+        measurements={measurements}
+        pendingPoint={pendingMeasurePoint}
+        onAddMeasurement={() => {}}
+        onSetPendingPoint={() => {}}
+      />
+
+      {/* Measurement click plane - at deck height for easy clicking */}
+      {onMeasureClick && (
+        <MeasurementClickPlane
+          enabled={measureMode}
+          height={spec.deckHeight}
+          onMeasureClick={onMeasureClick}
+        />
+      )}
     </>
   )
 }

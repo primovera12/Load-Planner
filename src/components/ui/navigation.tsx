@@ -11,6 +11,7 @@ import {
   FileText,
   Settings,
   Box,
+  FileSpreadsheet,
 } from 'lucide-react'
 
 const navigation = [
@@ -19,6 +20,7 @@ const navigation = [
   { name: 'Trucks', href: '/trucks', icon: Truck },
   { name: 'Routes', href: '/routes', icon: Route },
   { name: 'Visualize', href: '/visualize', icon: Box },
+  { name: 'Import', href: '/import', icon: FileSpreadsheet },
   { name: 'Quotes', href: '/quotes', icon: FileText, disabled: true },
 ]
 

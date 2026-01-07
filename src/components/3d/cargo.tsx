@@ -1,8 +1,10 @@
 'use client'
 
-import { useRef, useState, useMemo } from 'react'
+import { useRef, useState, useMemo, useCallback } from 'react'
 import * as THREE from 'three'
 import { Text, Line } from '@react-three/drei'
+import { useSpring, animated } from '@react-spring/three'
+import { ThreeEvent, useThree } from '@react-three/fiber'
 
 export interface CargoItem {
   id: string
@@ -22,10 +24,16 @@ interface CargoProps {
   showDimensions?: boolean
   isOversize?: boolean
   isOverheight?: boolean
+  isSelected?: boolean
+  onSelect?: (id: string) => void
+  onPositionChange?: (id: string, position: [number, number, number]) => void
+  deckLength?: number
+  deckWidth?: number
+  enableDrag?: boolean
 }
 
 /**
- * Single cargo item visualization
+ * Single cargo item visualization with spring animations and drag support
  */
 export function Cargo({
   item,
@@ -34,9 +42,18 @@ export function Cargo({
   showDimensions = true,
   isOversize = false,
   isOverheight = false,
+  isSelected = false,
+  onSelect,
+  onPositionChange,
+  deckLength = 48,
+  deckWidth = 8.5,
+  enableDrag = true,
 }: CargoProps) {
   const meshRef = useRef<THREE.Mesh>(null)
   const [hovered, setHovered] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragOffset, setDragOffset] = useState<[number, number]>([0, 0])
+  const { camera, gl } = useThree()
 
   // Default position on deck
   const position: [number, number, number] = item.position || [0, 0, 0]
@@ -50,34 +67,163 @@ export function Cargo({
     cargoColor = '#f59e0b' // Orange for oversize
   }
 
+  // Selection highlight color - cyan when dragging
+  const highlightColor = isDragging ? '#22d3ee' : isSelected ? '#22d3ee' : cargoColor
+
+  // Spring animation for entry and position changes
+  const { scale, posX, posY, posZ } = useSpring({
+    scale: 1,
+    posX: position[0],
+    posY: isDragging ? yPos + 0.5 : yPos, // Lift slightly when dragging
+    posZ: position[2],
+    from: { scale: 0, posX: position[0], posY: yPos + 5, posZ: position[2] },
+    config: { mass: 1, tension: isDragging ? 400 : 200, friction: 20 },
+  })
+
+  // Hover animation
+  const { hoverScale } = useSpring({
+    hoverScale: hovered || isDragging ? 1.02 : 1,
+    config: { mass: 0.5, tension: 400, friction: 20 },
+  })
+
+  // Calculate constrained position within deck bounds
+  const constrainPosition = useCallback(
+    (x: number, z: number): [number, number] => {
+      const halfDeckLength = deckLength / 2
+      const halfDeckWidth = deckWidth / 2
+      const halfCargoLength = item.length / 2
+      const halfCargoWidth = item.width / 2
+
+      // Constrain to deck bounds
+      const minX = -halfDeckLength + halfCargoLength
+      const maxX = halfDeckLength - halfCargoLength
+      const minZ = -halfDeckWidth + halfCargoWidth
+      const maxZ = halfDeckWidth - halfCargoWidth
+
+      return [
+        Math.max(minX, Math.min(maxX, x)),
+        Math.max(minZ, Math.min(maxZ, z)),
+      ]
+    },
+    [deckLength, deckWidth, item.length, item.width]
+  )
+
+  // Get world position from mouse event
+  const getWorldPosition = useCallback(
+    (event: PointerEvent): [number, number] => {
+      const rect = gl.domElement.getBoundingClientRect()
+      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+
+      // Create a ray from camera through mouse position
+      const raycaster = new THREE.Raycaster()
+      raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
+
+      // Intersect with horizontal plane at deck height
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -deckHeight)
+      const intersection = new THREE.Vector3()
+      raycaster.ray.intersectPlane(plane, intersection)
+
+      return [intersection.x, intersection.z]
+    },
+    [camera, gl, deckHeight]
+  )
+
+  // Handle pointer down - start dragging
+  const handlePointerDown = useCallback(
+    (e: ThreeEvent<PointerEvent>) => {
+      if (!enableDrag || !isSelected) return
+
+      e.stopPropagation()
+      setIsDragging(true)
+
+      // Calculate offset from cargo center to click point
+      const [worldX, worldZ] = getWorldPosition(e.nativeEvent)
+      setDragOffset([worldX - position[0], worldZ - position[2]])
+
+      // Capture pointer for drag tracking
+      ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    },
+    [enableDrag, isSelected, getWorldPosition, position]
+  )
+
+  // Handle pointer move - update position while dragging
+  const handlePointerMove = useCallback(
+    (e: ThreeEvent<PointerEvent>) => {
+      if (!isDragging || !onPositionChange) return
+
+      const [worldX, worldZ] = getWorldPosition(e.nativeEvent)
+      const newX = worldX - dragOffset[0]
+      const newZ = worldZ - dragOffset[1]
+
+      const [constrainedX, constrainedZ] = constrainPosition(newX, newZ)
+      onPositionChange(item.id, [constrainedX, 0, constrainedZ])
+    },
+    [isDragging, onPositionChange, getWorldPosition, dragOffset, constrainPosition, item.id]
+  )
+
+  // Handle pointer up - end dragging
+  const handlePointerUp = useCallback(
+    (e: ThreeEvent<PointerEvent>) => {
+      if (!isDragging) return
+
+      setIsDragging(false)
+      ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
+    },
+    [isDragging]
+  )
+
   return (
-    <group position={[position[0], yPos, position[2]]}>
+    <animated.group
+      position-x={posX}
+      position-y={posY}
+      position-z={posZ}
+      scale={scale.to((s) => [s * hoverScale.get(), s * hoverScale.get(), s * hoverScale.get()])}
+    >
       {/* Main cargo box */}
       <mesh
         ref={meshRef}
+        castShadow
+        receiveShadow
         onPointerOver={() => setHovered(true)}
-        onPointerOut={() => setHovered(false)}
+        onPointerOut={() => !isDragging && setHovered(false)}
+        onClick={(e) => {
+          if (isDragging) return
+          e.stopPropagation()
+          onSelect?.(item.id)
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
       >
         <boxGeometry args={[item.length, item.height, item.width]} />
         <meshStandardMaterial
-          color={cargoColor}
+          color={highlightColor}
           transparent
-          opacity={hovered ? 0.9 : 0.75}
-          emissive={hovered ? cargoColor : '#000000'}
-          emissiveIntensity={hovered ? 0.2 : 0}
+          opacity={hovered || isSelected ? 0.9 : 0.75}
+          emissive={hovered || isSelected ? highlightColor : '#000000'}
+          emissiveIntensity={hovered ? 0.3 : isSelected ? 0.2 : 0}
         />
       </mesh>
 
-      {/* Wireframe outline */}
+      {/* Wireframe outline - more prominent when selected */}
       <mesh>
         <boxGeometry args={[item.length, item.height, item.width]} />
         <meshBasicMaterial
-          color="#ffffff"
+          color={isSelected ? '#22d3ee' : '#ffffff'}
           wireframe
           transparent
-          opacity={0.3}
+          opacity={isSelected ? 0.8 : 0.3}
         />
       </mesh>
+
+      {/* Selection indicator ring */}
+      {isSelected && (
+        <mesh position={[0, item.height / 2 + 0.2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[Math.max(item.length, item.width) * 0.4, Math.max(item.length, item.width) * 0.45, 32]} />
+          <meshBasicMaterial color="#22d3ee" transparent opacity={0.6} side={THREE.DoubleSide} />
+        </mesh>
+      )}
 
       {/* Labels */}
       {showLabels && (
@@ -134,7 +280,7 @@ export function Cargo({
           />
         </>
       )}
-    </group>
+    </animated.group>
   )
 }
 
@@ -203,6 +349,12 @@ export function CargoGroup({
   showDimensions = true,
   legalMaxHeight = 13.5,
   legalMaxWidth = 8.5,
+  selectedId,
+  onSelect,
+  onPositionChange,
+  deckLength = 48,
+  deckWidth = 8.5,
+  enableDrag = true,
 }: {
   items: CargoItem[]
   deckHeight: number
@@ -210,6 +362,12 @@ export function CargoGroup({
   showDimensions?: boolean
   legalMaxHeight?: number
   legalMaxWidth?: number
+  selectedId?: string | null
+  onSelect?: (id: string | null) => void
+  onPositionChange?: (id: string, position: [number, number, number]) => void
+  deckLength?: number
+  deckWidth?: number
+  enableDrag?: boolean
 }) {
   return (
     <group>
@@ -227,6 +385,12 @@ export function CargoGroup({
             showDimensions={showDimensions}
             isOverheight={isOverheight}
             isOversize={isOversize}
+            isSelected={selectedId === item.id}
+            onSelect={onSelect}
+            onPositionChange={onPositionChange}
+            deckLength={deckLength}
+            deckWidth={deckWidth}
+            enableDrag={enableDrag}
           />
         )
       })}
