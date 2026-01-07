@@ -10,6 +10,7 @@ import {
   Route,
   FileText,
   Settings,
+  Box,
 } from 'lucide-react'
 
 const navigation = [
@@ -17,6 +18,7 @@ const navigation = [
   { name: 'Analyze', href: '/analyze', icon: ScanSearch },
   { name: 'Trucks', href: '/trucks', icon: Truck },
   { name: 'Routes', href: '/routes', icon: Route },
+  { name: 'Visualize', href: '/visualize', icon: Box },
   { name: 'Quotes', href: '/quotes', icon: FileText, disabled: true },
 ]
 
