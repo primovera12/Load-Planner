@@ -20,6 +20,7 @@
   },
   "homepage": "https://github.com/primovera12/Load-Planner#readme",
   "dependencies": {
+    "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-slot": "^1.2.4",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^25.0.3",

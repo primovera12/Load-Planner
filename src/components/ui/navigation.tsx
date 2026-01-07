@@ -16,7 +16,7 @@ const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Analyze', href: '/analyze', icon: ScanSearch },
   { name: 'Trucks', href: '/trucks', icon: Truck },
-  { name: 'Routes', href: '/routes', icon: Route, disabled: true },
+  { name: 'Routes', href: '/routes', icon: Route },
   { name: 'Quotes', href: '/quotes', icon: FileText, disabled: true },
 ]
 
