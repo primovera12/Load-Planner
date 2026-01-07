@@ -1,93 +1,133 @@
 /**
  * Email Parser for Load Planner
  *
- * Mock implementation using pattern matching.
+ * Enhanced pattern matching for various freight email formats.
  * Ready to be swapped with Vercel AI SDK + Gemini for production.
  */
 
 import { ParsedLoad, LoadItem } from '@/types'
-import { parseDimension, parseWeight } from './unit-converter'
 
 function generateId(): string {
   return Math.random().toString(36).substring(2, 15)
 }
 
 /**
- * Extract dimensions from text - simplified and robust approach
+ * Parse a single dimension value from string
+ */
+function parseSingleDimension(str: string): number | null {
+  if (!str) return null
+  const s = str.trim().toLowerCase()
+
+  // Handle feet-inches: 10'6", 10' 6", 10-6
+  const feetInches = s.match(/(\d+)\s*[\''\-]\s*(\d+)\s*[\""]?/)
+  if (feetInches) {
+    return parseFloat(feetInches[1]) + parseFloat(feetInches[2]) / 12
+  }
+
+  // Handle feet only: 10', 10 ft, 10feet
+  const feetOnly = s.match(/(\d+(?:\.\d+)?)\s*(?:[\'']|ft|feet)/)
+  if (feetOnly) {
+    return parseFloat(feetOnly[1])
+  }
+
+  // Handle meters: 3.2m, 3.2 meters
+  const meters = s.match(/(\d+(?:\.\d+)?)\s*(?:m|meters?)(?!\w)/i)
+  if (meters) {
+    return parseFloat(meters[1]) * 3.28084
+  }
+
+  // Handle centimeters: 320cm
+  const cm = s.match(/(\d+(?:\.\d+)?)\s*(?:cm|centimeters?)/)
+  if (cm) {
+    return parseFloat(cm[1]) * 0.0328084
+  }
+
+  // Handle inches: 120", 120 in
+  const inches = s.match(/(\d+(?:\.\d+)?)\s*(?:[\""]|in|inches?)/)
+  if (inches) {
+    return parseFloat(inches[1]) / 12
+  }
+
+  // Plain number (assume feet)
+  const plain = s.match(/^(\d+(?:\.\d+)?)$/)
+  if (plain) {
+    return parseFloat(plain[1])
+  }
+
+  return null
+}
+
+/**
+ * Extract dimensions from text
  */
 function extractDimensions(text: string): {
   length: number | null
   width: number | null
   height: number | null
 } {
-  // First, look for "L x W x H" pattern on a single line
   const lines = text.split('\n')
 
+  // Pattern 1: "L x W x H" on single line
   for (const line of lines) {
-    // Look for dimension line: "32' x 10' x 10'6"" or "Dimensions: 32 x 10 x 10.5"
-    if (line.match(/\d+.*x.*\d+.*x.*\d+/i)) {
-      // Split by 'x' and extract each dimension
-      const parts = line.split(/\s*x\s*/i)
-      if (parts.length >= 3) {
-        // Extract numbers with units from each part
-        const extractDim = (part: string): number | null => {
-          // Match patterns like "32'", "32'6"", "32 ft", "10.5", "3.2m"
-          const match = part.match(/(\d+(?:\.\d+)?)\s*[\'']?\s*(\d+)?\s*[\""]?\s*(ft|feet|m|meters?|cm)?/i)
-          if (match) {
-            const mainNum = parseFloat(match[1])
-            const inchNum = match[2] ? parseFloat(match[2]) : 0
-            const unit = match[3]?.toLowerCase()
-
-            if (unit === 'm' || unit === 'meters' || unit === 'meter') {
-              return mainNum * 3.28084
-            } else if (unit === 'cm') {
-              return mainNum * 0.0328084
-            } else {
-              // Assume feet (with optional inches)
-              return mainNum + (inchNum / 12)
-            }
-          }
-          return null
-        }
-
-        const length = extractDim(parts[0])
-        const width = extractDim(parts[1])
-        const height = extractDim(parts[2])
-
-        if (length !== null && width !== null && height !== null) {
-          return { length, width, height }
-        }
+    // Match patterns like "32' x 10' x 10'6"" or "32x10x10.5"
+    const lwhMatch = line.match(
+      /(\d+(?:\.\d+)?(?:\s*[\''\-]\s*\d+)?(?:\s*[\""])?(?:\s*(?:ft|feet|m|cm))?)\s*[x×]\s*(\d+(?:\.\d+)?(?:\s*[\''\-]\s*\d+)?(?:\s*[\""])?(?:\s*(?:ft|feet|m|cm))?)\s*[x×]\s*(\d+(?:\.\d+)?(?:\s*[\''\-]\s*\d+)?(?:\s*[\""])?(?:\s*(?:ft|feet|m|cm))?)/i
+    )
+    if (lwhMatch) {
+      const l = parseSingleDimension(lwhMatch[1])
+      const w = parseSingleDimension(lwhMatch[2])
+      const h = parseSingleDimension(lwhMatch[3])
+      if (l !== null && w !== null && h !== null) {
+        return { length: l, width: w, height: h }
       }
     }
   }
 
-  // Fallback: Look for individually labeled dimensions
+  // Pattern 2: Labeled dimensions (Length: X, Width: Y, Height: Z)
   let length: number | null = null
   let width: number | null = null
   let height: number | null = null
 
-  // Length patterns
-  const lengthMatch = text.match(/(?:length|long)\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*[\'']?\s*(\d+)?\s*[\""]?\s*(ft|feet|m|cm)?/i)
-  if (lengthMatch) {
-    const mainNum = parseFloat(lengthMatch[1])
-    const inchNum = lengthMatch[2] ? parseFloat(lengthMatch[2]) : 0
-    length = mainNum + (inchNum / 12)
+  // Length
+  const lengthPatterns = [
+    /length\s*[:\-=]?\s*(\d+(?:\.\d+)?(?:\s*[\''\-]\s*\d+)?(?:\s*[\""])?(?:\s*(?:ft|feet|m|cm))?)/i,
+    /(\d+(?:\.\d+)?(?:\s*[\''\-]\s*\d+)?)\s*(?:long|length|l\b)/i,
+    /-\s*(\d+(?:\.\d+)?(?:\s*[\''\-]\s*\d+)?(?:\s*[\""])?)\s*(?:ft|feet|')?\s*[lL]\b/,
+  ]
+  for (const pattern of lengthPatterns) {
+    const match = text.match(pattern)
+    if (match) {
+      length = parseSingleDimension(match[1])
+      if (length !== null) break
+    }
   }
 
-  // Width patterns
-  const widthMatch = text.match(/(?:width|wide)\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*[\'']?\s*(\d+)?\s*[\""]?\s*(ft|feet|m|cm)?/i)
-  if (widthMatch) {
-    const mainNum = parseFloat(widthMatch[1])
-    const inchNum = widthMatch[2] ? parseFloat(widthMatch[2]) : 0
-    width = mainNum + (inchNum / 12)
+  // Width
+  const widthPatterns = [
+    /width\s*[:\-=]?\s*(\d+(?:\.\d+)?(?:\s*[\''\-]\s*\d+)?(?:\s*[\""])?(?:\s*(?:ft|feet|m|cm))?)/i,
+    /(\d+(?:\.\d+)?(?:\s*[\''\-]\s*\d+)?)\s*(?:wide|width|w\b)/i,
+    /-\s*(\d+(?:\.\d+)?(?:\s*[\''\-]\s*\d+)?(?:\s*[\""])?)\s*(?:ft|feet|')?\s*[wW]\b/,
+  ]
+  for (const pattern of widthPatterns) {
+    const match = text.match(pattern)
+    if (match) {
+      width = parseSingleDimension(match[1])
+      if (width !== null) break
+    }
   }
 
-  // Height patterns
-  const heightMatch = text.match(/(?:height|high|tall)\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*[\'']?\s*(\d+)?\s*[\""]?\s*(ft|feet|m|cm)?/i)
-  if (heightMatch) {
-    const mainNum = parseFloat(heightMatch[1])
-    const inchNum = heightMatch[2] ? parseFloat(heightMatch[2]) : 0
-    height = mainNum + (inchNum / 12)
+  // Height
+  const heightPatterns = [
+    /height\s*[:\-=]?\s*(\d+(?:\.\d+)?(?:\s*[\''\-]\s*\d+)?(?:\s*[\""])?(?:\s*(?:ft|feet|m|cm))?)/i,
+    /(\d+(?:\.\d+)?(?:\s*[\''\-]\s*\d+)?)\s*(?:high|height|tall|h\b)/i,
+    /-\s*(\d+(?:\.\d+)?(?:\s*[\''\-]\s*\d+)?(?:\s*[\""])?)\s*(?:ft|feet|')?\s*[hH]\b/,
+  ]
+  for (const pattern of heightPatterns) {
+    const match = text.match(pattern)
+    if (match) {
+      height = parseSingleDimension(match[1])
+      if (height !== null) break
+    }
   }
 
   return { length, width, height }
@@ -99,25 +139,35 @@ function extractDimensions(text: string): {
 function extractWeight(text: string): number | null {
   const normalizedText = text.replace(/,/g, '')
 
-  // Weight patterns
   const patterns = [
-    /(?:weight|wt)\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(k)?\s*(lbs?|pounds?|tons?|kg)?/i,
-    /(\d+(?:\.\d+)?)\s*(k)?\s*(lbs?|pounds?)/i,
-    /(\d+(?:\.\d+)?)\s*(tons?|mt)/i,
+    // Weight: 52,000 lbs or weight: 52000 pounds
+    { regex: /weight\s*[:\-=]?\s*(\d+(?:\.\d+)?)\s*(k)?\s*(lbs?|pounds?)?/i, unit: 'lbs' },
+    // 52,000 lbs or 52000 pounds
+    { regex: /(\d+(?:\.\d+)?)\s*(k)?\s*(lbs?|pounds?)/i, unit: 'lbs' },
+    // 26 tons or 26 ton
+    { regex: /(\d+(?:\.\d+)?)\s*(tons?)\b/i, unit: 'tons' },
+    // 20 MT or 20 metric tons
+    { regex: /(\d+(?:\.\d+)?)\s*(mt|metric\s*tons?)/i, unit: 'mt' },
+    // 20000 kg
+    { regex: /(\d+(?:\.\d+)?)\s*(kg|kilograms?)/i, unit: 'kg' },
   ]
 
-  for (const pattern of patterns) {
-    const match = normalizedText.match(pattern)
+  for (const { regex, unit } of patterns) {
+    const match = normalizedText.match(regex)
     if (match) {
       let value = parseFloat(match[1])
-      const hasK = match[2]?.toLowerCase() === 'k'
-      const unit = match[3]?.toLowerCase() || ''
 
-      if (hasK) value *= 1000
+      // Handle K notation (52K = 52000)
+      if (match[2]?.toLowerCase() === 'k') {
+        value *= 1000
+      }
 
-      if (unit.includes('ton') || unit === 'mt') {
+      // Convert to pounds
+      if (unit === 'tons' || match[2]?.toLowerCase() === 'tons') {
         value *= 2000
-      } else if (unit === 'kg') {
+      } else if (unit === 'mt' || match[2]?.toLowerCase()?.includes('mt')) {
+        value *= 2204.62
+      } else if (unit === 'kg' || match[2]?.toLowerCase() === 'kg') {
         value *= 2.20462
       }
 
@@ -129,7 +179,7 @@ function extractWeight(text: string): number | null {
 }
 
 /**
- * Extract locations (origin/destination) from text
+ * Extract locations from text
  */
 function extractLocations(text: string): {
   origin: string | null
@@ -140,23 +190,28 @@ function extractLocations(text: string): {
 
   const lines = text.split('\n')
 
-  for (const line of lines) {
-    const trimmedLine = line.trim()
+  // US state abbreviations for pattern matching
+  const statePattern = /[A-Z]{2}/
 
-    // Origin patterns - match "From: Houston, TX" or "Pickup: Houston, TX"
+  for (const line of lines) {
+    const trimmed = line.trim()
+
+    // Origin patterns
     if (!origin) {
-      const originMatch = trimmedLine.match(
-        /^(?:from|origin|pickup|pick[\s-]?up)\s*[:\-]\s*(.+)$/i
+      // "From: Houston, TX" or "Pickup: Houston TX 77001"
+      const originMatch = trimmed.match(
+        /^(?:from|origin|pickup|pick[\s-]?up|ship(?:ping)?\s*from)\s*[:\-]?\s*(.+)/i
       )
       if (originMatch) {
         origin = originMatch[1].trim().replace(/[,.]$/, '')
       }
     }
 
-    // Destination patterns - match "To: Dallas, TX" or "Delivery: Dallas, TX"
+    // Destination patterns
     if (!destination) {
-      const destMatch = trimmedLine.match(
-        /^(?:to|destination|delivery|deliver[\s-]?to)\s*[:\-]\s*(.+)$/i
+      // "To: Dallas, TX" or "Delivery: Dallas TX"
+      const destMatch = trimmed.match(
+        /^(?:to|destination|delivery|deliver[\s-]?to|ship(?:ping)?\s*to)\s*[:\-]?\s*(.+)/i
       )
       if (destMatch) {
         destination = destMatch[1].trim().replace(/[,.]$/, '')
@@ -164,40 +219,79 @@ function extractLocations(text: string): {
     }
   }
 
+  // Fallback: Try inline pattern "from X to Y"
+  if (!origin || !destination) {
+    const inlineMatch = text.match(
+      /from\s+([A-Za-z\s]+,?\s*[A-Z]{2}(?:\s+\d{5})?)\s+to\s+([A-Za-z\s]+,?\s*[A-Z]{2}(?:\s+\d{5})?)/i
+    )
+    if (inlineMatch) {
+      if (!origin) origin = inlineMatch[1].trim()
+      if (!destination) destination = inlineMatch[2].trim()
+    }
+  }
+
+  // Fallback: Look for "City, ST" patterns
+  if (!origin || !destination) {
+    const cityStateMatches = text.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),?\s+([A-Z]{2})(?:\s+\d{5})?/g)
+    if (cityStateMatches && cityStateMatches.length >= 2) {
+      if (!origin) origin = cityStateMatches[0]
+      if (!destination) destination = cityStateMatches[1]
+    }
+  }
+
   return { origin, destination }
 }
 
 /**
- * Extract description/item name from text
+ * Extract description/equipment name
  */
 function extractDescription(text: string): string | null {
   const lines = text.split('\n')
 
-  // Look for subject line
+  // Subject line
   for (const line of lines) {
-    if (line.toLowerCase().includes('subject:')) {
-      const subject = line.replace(/subject:\s*/i, '').trim()
-      if (subject.length > 0) return subject
+    const subjectMatch = line.match(/^subject:\s*(.+)/i)
+    if (subjectMatch) {
+      const subject = subjectMatch[1].trim()
+      // Clean up common prefixes
+      const cleaned = subject
+        .replace(/^(?:re:|fwd:|fw:)\s*/i, '')
+        .replace(/^(?:quote\s+(?:request|needed)|need\s+quote)\s*[-:]\s*/i, '')
+        .trim()
+      if (cleaned.length > 0) return cleaned
     }
   }
 
-  // Look for equipment/cargo description
-  for (const line of lines) {
-    const match = line.match(/(?:equipment|cargo|item|machine|unit)\s*[:\-]\s*(.+)/i)
+  // Equipment/cargo labels
+  const labelPatterns = [
+    /(?:equipment|cargo|item|machine|unit|load)\s*[:\-]\s*(.+)/i,
+    /(?:moving|transport(?:ing)?|ship(?:ping)?|haul(?:ing)?)\s+(?:a|an|one)?\s*(.+?)(?:\s+from|\s+to|\s*$)/i,
+    /quote\s+(?:for|on|needed\s+for)\s+(.+)/i,
+  ]
+
+  for (const pattern of labelPatterns) {
+    const match = text.match(pattern)
     if (match) {
-      return match[1].trim()
+      let desc = match[1].trim()
+      // Remove trailing dimension/weight info
+      desc = desc.split(/\d+[\'\"x\s]*(?:ft|lbs|tons)/i)[0].trim()
+      desc = desc.replace(/[,.]$/, '')
+      if (desc.length > 2 && desc.length < 100) return desc
     }
   }
 
-  // First meaningful line (not a label)
+  // First meaningful line
   for (const line of lines) {
     const trimmed = line.trim()
+    // Skip common non-description lines
     if (
       trimmed.length > 3 &&
       trimmed.length < 80 &&
-      !trimmed.match(/^(?:from|to|weight|dimension|height|width|length|subject|hi|hello|please|thanks|we need|quote)/i) &&
+      !trimmed.match(/^(?:from|to|weight|dimension|height|width|length|subject|hi|hello|dear|please|thanks|we need|quote|re:|fw:|fwd:)/i) &&
       !trimmed.match(/^\d+\s*[\'\"x]/) &&
-      !trimmed.match(/^\d+.*lbs/i)
+      !trimmed.match(/^\d+.*(?:lbs|tons|kg)/i) &&
+      !trimmed.match(/^(?:pickup|delivery|ship)/i) &&
+      !trimmed.match(/@/) // Skip email addresses
     ) {
       return trimmed.replace(/[,.]$/, '')
     }
@@ -207,18 +301,63 @@ function extractDescription(text: string): string | null {
 }
 
 /**
+ * Extract dates from text
+ */
+function extractDates(text: string): {
+  pickupDate: string | null
+  deliveryDate: string | null
+} {
+  let pickupDate: string | null = null
+  let deliveryDate: string | null = null
+
+  // Common date patterns
+  const datePattern = /(?:(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4}))|(?:(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?)|(?:(\d{1,2})(?:st|nd|rd|th)?\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?(?:,?\s+(\d{4}))?)/gi
+
+  // Pickup date
+  const pickupMatch = text.match(
+    /(?:pickup|pick[\s-]?up|available|ready)\s*(?:date)?[:\-]?\s*([^\n]+)/i
+  )
+  if (pickupMatch) {
+    const dateMatch = pickupMatch[1].match(datePattern)
+    if (dateMatch) {
+      pickupDate = dateMatch[0]
+    }
+  }
+
+  // Delivery date
+  const deliveryMatch = text.match(
+    /(?:delivery|deliver|due|needed\s+by)\s*(?:date)?[:\-]?\s*([^\n]+)/i
+  )
+  if (deliveryMatch) {
+    const dateMatch = deliveryMatch[1].match(datePattern)
+    if (dateMatch) {
+      deliveryDate = dateMatch[0]
+    }
+  }
+
+  return { pickupDate, deliveryDate }
+}
+
+/**
  * Calculate confidence score
  */
 function calculateConfidence(parsedLoad: ParsedLoad): number {
   let score = 0
 
+  // Core fields (65 points)
   if (parsedLoad.length && parsedLoad.length > 0) score += 15
   if (parsedLoad.width && parsedLoad.width > 0) score += 15
   if (parsedLoad.height && parsedLoad.height > 0) score += 10
   if (parsedLoad.weight && parsedLoad.weight > 0) score += 25
+
+  // Location fields (20 points)
   if (parsedLoad.origin) score += 10
   if (parsedLoad.destination) score += 10
+
+  // Description (10 points)
   if (parsedLoad.description) score += 10
+
+  // Dates (5 points)
   if (parsedLoad.pickupDate || parsedLoad.deliveryDate) score += 5
 
   return Math.min(score, 100)
@@ -232,6 +371,7 @@ export async function parseEmail(emailText: string): Promise<ParsedLoad> {
   const weight = extractWeight(emailText)
   const locations = extractLocations(emailText)
   const description = extractDescription(emailText)
+  const dates = extractDates(emailText)
 
   const primaryItem: LoadItem = {
     id: generateId(),
@@ -252,6 +392,8 @@ export async function parseEmail(emailText: string): Promise<ParsedLoad> {
     destination: locations.destination || undefined,
     items: [primaryItem],
     description: description || undefined,
+    pickupDate: dates.pickupDate || undefined,
+    deliveryDate: dates.deliveryDate || undefined,
     confidence: 0,
     rawFields: {
       extractedLength: dimensions.length?.toString() || '',
