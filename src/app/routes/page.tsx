@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,9 +25,36 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
+  Navigation,
+  Fuel,
+  ToggleLeft,
+  ToggleRight,
 } from 'lucide-react'
 import { RoutePermitSummary, PermitRequirement } from '@/types'
-import { statePermits } from '@/data/state-permits'
+
+// Dynamically import the map component (client-side only)
+const RouteMap = dynamic(
+  () => import('@/components/route-map').then((mod) => mod.RouteMap),
+  { ssr: false, loading: () => <MapPlaceholder /> }
+)
+
+function MapPlaceholder() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <Navigation className="h-5 w-5" />
+          Route Map
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="h-[400px] w-full rounded-lg border bg-slate-100 flex items-center justify-center animate-pulse">
+          <div className="text-muted-foreground">Loading map...</div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 // US State codes
 const US_STATES = [
@@ -37,16 +65,49 @@ const US_STATES = [
   'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'
 ]
 
+interface RouteData {
+  origin: { lat: number; lng: number; address?: string }
+  destination: { lat: number; lng: number; address?: string }
+  totalDistance: number
+  totalDuration: number
+  statesTraversed: string[]
+  stateDistances: Record<string, number>
+  polyline: string
+  bounds: {
+    northeast: { lat: number; lng: number }
+    southwest: { lat: number; lng: number }
+  }
+}
+
+interface CostBreakdown {
+  permits: number
+  escorts: number
+  fuel: number
+  total: number
+}
+
 export default function RoutesPage() {
+  // Mode toggle
+  const [useAutoRoute, setUseAutoRoute] = useState(true)
+
+  // Route inputs
   const [origin, setOrigin] = useState('')
   const [destination, setDestination] = useState('')
   const [selectedStates, setSelectedStates] = useState<string[]>([])
+
+  // Cargo specs
   const [width, setWidth] = useState('10')
   const [height, setHeight] = useState('12.5')
   const [length, setLength] = useState('32')
   const [weight, setWeight] = useState('72000')
+
+  // Results
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [results, setResults] = useState<RoutePermitSummary | null>(null)
+  const [routeData, setRouteData] = useState<RouteData | null>(null)
+  const [costs, setCosts] = useState<CostBreakdown | null>(null)
+  const [mapPoints, setMapPoints] = useState<{ lat: number; lng: number }[]>([])
   const [expandedState, setExpandedState] = useState<string | null>(null)
 
   const toggleState = (code: string) => {
@@ -57,13 +118,68 @@ export default function RoutesPage() {
     )
   }
 
-  const calculatePermits = async () => {
-    if (selectedStates.length === 0) {
-      alert('Please select at least one state')
+  // Calculate route with Google Maps
+  const calculateAutoRoute = async () => {
+    if (!origin || !destination) {
+      setError('Please enter origin and destination addresses')
       return
     }
 
     setIsLoading(true)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/routes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          origin,
+          destination,
+          width: parseFloat(width),
+          height: parseFloat(height),
+          length: parseFloat(length),
+          grossWeight: parseFloat(weight),
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        if (data.fallback) {
+          // API not configured, switch to manual mode
+          setError('Google Maps API not configured. Please use manual state selection.')
+          setUseAutoRoute(false)
+        } else {
+          setError(data.message || data.error || 'Failed to calculate route')
+        }
+        return
+      }
+
+      if (data.success) {
+        setRouteData(data.data.route)
+        setResults(data.data.permits)
+        setCosts(data.data.costs)
+        setMapPoints(data.data.mapPoints || [])
+        setSelectedStates(data.data.route.statesTraversed)
+      }
+    } catch (err) {
+      setError('Failed to calculate route. Please try again.')
+      console.error('Route calculation error:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Calculate permits for manual state selection
+  const calculateManualPermits = async () => {
+    if (selectedStates.length === 0) {
+      setError('Please select at least one state')
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+
     try {
       const response = await fetch('/api/permits', {
         method: 'POST',
@@ -80,17 +196,38 @@ export default function RoutesPage() {
       const data = await response.json()
       if (data.success) {
         setResults(data.data)
+        setRouteData(null)
+        setCosts({
+          permits: data.data.totalPermitFees,
+          escorts: data.data.totalEscortCost,
+          fuel: 0,
+          total: data.data.totalPermitFees + data.data.totalEscortCost,
+        })
+        setMapPoints([])
       }
-    } catch (error) {
-      console.error('Error calculating permits:', error)
+    } catch (err) {
+      setError('Error calculating permits')
+      console.error('Permit calculation error:', err)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleCalculate = () => {
+    if (useAutoRoute) {
+      calculateAutoRoute()
+    } else {
+      calculateManualPermits()
     }
   }
 
   const clearAll = () => {
     setSelectedStates([])
     setResults(null)
+    setRouteData(null)
+    setCosts(null)
+    setMapPoints([])
+    setError(null)
   }
 
   return (
@@ -114,6 +251,131 @@ export default function RoutesPage() {
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Left Column - Inputs */}
           <div className="lg:col-span-1 space-y-6">
+            {/* Mode Toggle */}
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-medium">Route Mode</div>
+                    <div className="text-sm text-muted-foreground">
+                      {useAutoRoute ? 'Auto-detect states from addresses' : 'Manually select states'}
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setUseAutoRoute(!useAutoRoute)}
+                    className="gap-2"
+                  >
+                    {useAutoRoute ? (
+                      <>
+                        <ToggleRight className="h-5 w-5 text-primary" />
+                        Auto
+                      </>
+                    ) : (
+                      <>
+                        <ToggleLeft className="h-5 w-5" />
+                        Manual
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Route Inputs - Auto Mode */}
+            {useAutoRoute && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <MapPin className="h-5 w-5" />
+                    Route Addresses
+                  </CardTitle>
+                  <CardDescription>
+                    Enter addresses to auto-detect route states
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <Label htmlFor="origin">Origin</Label>
+                    <Input
+                      id="origin"
+                      placeholder="e.g., Houston, TX"
+                      value={origin}
+                      onChange={(e) => setOrigin(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="destination">Destination</Label>
+                    <Input
+                      id="destination"
+                      placeholder="e.g., Chicago, IL"
+                      value={destination}
+                      onChange={(e) => setDestination(e.target.value)}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Route Inputs - Manual Mode */}
+            {!useAutoRoute && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <MapPin className="h-5 w-5" />
+                    Route States
+                  </CardTitle>
+                  <CardDescription>
+                    Select states your route passes through (in order)
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-1 mb-4">
+                    {US_STATES.map((code) => (
+                      <button
+                        key={code}
+                        onClick={() => toggleState(code)}
+                        className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+                          selectedStates.includes(code)
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-slate-100 hover:bg-slate-200'
+                        }`}
+                      >
+                        {code}
+                      </button>
+                    ))}
+                  </div>
+
+                  {selectedStates.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-sm text-muted-foreground">
+                        Selected route ({selectedStates.length} states):
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {selectedStates.map((code, idx) => (
+                          <span key={code} className="flex items-center">
+                            <Badge variant="secondary">{code}</Badge>
+                            {idx < selectedStates.length - 1 && (
+                              <span className="mx-1 text-muted-foreground">→</span>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearAll}
+                        className="text-xs"
+                      >
+                        Clear All
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Cargo Specifications */}
             <Card>
               <CardHeader>
@@ -209,65 +471,15 @@ export default function RoutesPage() {
               </CardContent>
             </Card>
 
-            {/* State Selection */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <MapPin className="h-5 w-5" />
-                  Route States
-                </CardTitle>
-                <CardDescription>
-                  Select states your route passes through (in order)
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-wrap gap-1 mb-4">
-                  {US_STATES.map((code) => (
-                    <button
-                      key={code}
-                      onClick={() => toggleState(code)}
-                      className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
-                        selectedStates.includes(code)
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-slate-100 hover:bg-slate-200'
-                      }`}
-                    >
-                      {code}
-                    </button>
-                  ))}
-                </div>
-
-                {selectedStates.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="text-sm text-muted-foreground">
-                      Selected route ({selectedStates.length} states):
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      {selectedStates.map((code, idx) => (
-                        <span key={code} className="flex items-center">
-                          <Badge variant="secondary">{code}</Badge>
-                          {idx < selectedStates.length - 1 && (
-                            <span className="mx-1 text-muted-foreground">→</span>
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={clearAll}
-                      className="text-xs"
-                    >
-                      Clear All
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            {error && (
+              <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                {error}
+              </div>
+            )}
 
             <Button
-              onClick={calculatePermits}
-              disabled={isLoading || selectedStates.length === 0}
+              onClick={handleCalculate}
+              disabled={isLoading || (useAutoRoute ? (!origin || !destination) : selectedStates.length === 0)}
               className="w-full"
             >
               {isLoading ? (
@@ -278,7 +490,7 @@ export default function RoutesPage() {
               ) : (
                 <>
                   <Shield className="mr-2 h-4 w-4" />
-                  Calculate Permits
+                  {useAutoRoute ? 'Calculate Route & Permits' : 'Calculate Permits'}
                 </>
               )}
             </Button>
@@ -286,17 +498,58 @@ export default function RoutesPage() {
 
           {/* Right Column - Results */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Map */}
+            {(routeData || mapPoints.length > 0) && (
+              <RouteMap
+                origin={routeData?.origin}
+                destination={routeData?.destination}
+                routePoints={mapPoints}
+                statesTraversed={routeData?.statesTraversed || selectedStates}
+                bounds={routeData?.bounds}
+              />
+            )}
+
             {results ? (
               <>
-                {/* Summary Cards */}
-                <div className="grid gap-4 sm:grid-cols-3">
+                {/* Route Summary (if auto mode) */}
+                {routeData && (
+                  <Card className="bg-blue-50 border-blue-200">
+                    <CardContent className="pt-6">
+                      <div className="flex items-start gap-3">
+                        <Navigation className="h-5 w-5 text-blue-600 mt-0.5" />
+                        <div className="flex-1">
+                          <div className="font-medium text-blue-800 mb-2">Route Summary</div>
+                          <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                              <span className="text-blue-600">Distance:</span>{' '}
+                              <span className="font-medium">{routeData.totalDistance.toLocaleString()} miles</span>
+                            </div>
+                            <div>
+                              <span className="text-blue-600">Duration:</span>{' '}
+                              <span className="font-medium">
+                                {Math.floor(routeData.totalDuration / 60)}h {routeData.totalDuration % 60}m
+                              </span>
+                            </div>
+                            <div className="col-span-2">
+                              <span className="text-blue-600">Route:</span>{' '}
+                              <span className="font-medium">{routeData.statesTraversed.join(' → ')}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Cost Summary Cards */}
+                <div className="grid gap-4 sm:grid-cols-4">
                   <Card>
                     <CardContent className="pt-6">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm text-muted-foreground">Permit Fees</p>
+                          <p className="text-sm text-muted-foreground">Permits</p>
                           <p className="text-2xl font-bold">
-                            ${results.totalPermitFees.toLocaleString()}
+                            ${costs?.permits.toLocaleString() || 0}
                           </p>
                         </div>
                         <DollarSign className="h-8 w-8 text-muted-foreground" />
@@ -307,22 +560,37 @@ export default function RoutesPage() {
                     <CardContent className="pt-6">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm text-muted-foreground">Escort Cost (Est.)</p>
+                          <p className="text-sm text-muted-foreground">Escorts</p>
                           <p className="text-2xl font-bold">
-                            ${results.totalEscortCost.toLocaleString()}
+                            ${costs?.escorts.toLocaleString() || 0}
                           </p>
                         </div>
                         <Users className="h-8 w-8 text-muted-foreground" />
                       </div>
                     </CardContent>
                   </Card>
-                  <Card>
+                  {costs?.fuel ? (
+                    <Card>
+                      <CardContent className="pt-6">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm text-muted-foreground">Fuel (Est.)</p>
+                            <p className="text-2xl font-bold">
+                              ${costs.fuel.toLocaleString()}
+                            </p>
+                          </div>
+                          <Fuel className="h-8 w-8 text-muted-foreground" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ) : null}
+                  <Card className={costs?.fuel ? '' : 'sm:col-span-2'}>
                     <CardContent className="pt-6">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm text-muted-foreground">Total Estimate</p>
+                          <p className="text-sm text-muted-foreground">Total</p>
                           <p className="text-2xl font-bold text-primary">
-                            ${(results.totalPermitFees + results.totalEscortCost).toLocaleString()}
+                            ${costs?.total.toLocaleString() || 0}
                           </p>
                         </div>
                         <Shield className="h-8 w-8 text-primary" />
@@ -386,6 +654,7 @@ export default function RoutesPage() {
                         <StatePermitCard
                           key={state.stateCode}
                           permit={state}
+                          distance={routeData?.stateDistances?.[state.stateCode]}
                           expanded={expandedState === state.stateCode}
                           onToggle={() =>
                             setExpandedState(
@@ -404,8 +673,9 @@ export default function RoutesPage() {
                   <Route className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                   <h3 className="font-medium text-lg mb-2">No Route Calculated</h3>
                   <p className="text-sm text-muted-foreground max-w-md">
-                    Enter your cargo specifications and select the states your route passes through,
-                    then click &quot;Calculate Permits&quot; to see requirements and costs.
+                    {useAutoRoute
+                      ? 'Enter origin and destination addresses, then click "Calculate Route & Permits" to see the route, requirements, and costs.'
+                      : 'Select the states your route passes through, then click "Calculate Permits" to see requirements and costs.'}
                   </p>
                 </CardContent>
               </Card>
@@ -419,10 +689,12 @@ export default function RoutesPage() {
 
 function StatePermitCard({
   permit,
+  distance,
   expanded,
   onToggle
 }: {
   permit: PermitRequirement
+  distance?: number
   expanded: boolean
   onToggle: () => void
 }) {
@@ -439,6 +711,9 @@ function StatePermitCard({
             {permit.stateCode}
           </Badge>
           <span className="font-medium">{permit.state}</span>
+          {distance && (
+            <span className="text-sm text-muted-foreground">({distance} mi)</span>
+          )}
           {permit.isSuperload && (
             <Badge variant="destructive" className="text-xs">SUPERLOAD</Badge>
           )}
