@@ -92,7 +92,7 @@ export async function parseImageWithAI(
     const base64Data = match[2]
 
     // Use Gemini Vision model
-    const model = ai.getGenerativeModel({ model: 'gemini-2.0-flash' })
+    const model = ai.getGenerativeModel({ model: 'gemini-3-pro-preview' })
 
     const result = await model.generateContent([
       VISION_PROMPT,
@@ -181,7 +181,7 @@ export async function parseTextWithAI(text: string): Promise<AIParseResult> {
   }
 
   try {
-    const model = ai.getGenerativeModel({ model: 'gemini-2.0-flash' })
+    const model = ai.getGenerativeModel({ model: 'gemini-3-pro-preview' })
 
     const prompt = `You are an expert at extracting cargo/freight data from ANY format - spreadsheets, tables, packing lists, emails, PDFs, etc.
 
