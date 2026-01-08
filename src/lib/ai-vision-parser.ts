@@ -202,15 +202,22 @@ export async function parseImageWithAI(
  * Handles any format: spreadsheets, tables, emails, documents, etc.
  */
 export async function parseTextWithAI(text: string): Promise<AIParseResult> {
+  // Debug: Log if API key is set
+  console.log('ANTHROPIC_API_KEY set:', !!process.env.ANTHROPIC_API_KEY)
+  console.log('ANTHROPIC_API_KEY length:', process.env.ANTHROPIC_API_KEY?.length || 0)
+
   const client = getAnthropic()
 
   if (!client) {
+    console.error('Failed to create Anthropic client - API key missing or invalid')
     return {
       success: false,
       items: [],
       error: 'AI service not configured. Please set ANTHROPIC_API_KEY.',
     }
   }
+
+  console.log('Anthropic client created successfully, calling Claude Opus 4.5...')
 
   try {
     const message = await client.messages.create({

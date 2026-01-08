@@ -161,7 +161,16 @@ export async function POST(request: NextRequest) {
           } else {
             // AI didn't work, use pattern matching result
             console.log('AI parsing failed, using pattern matching. AI error:', aiResult.error)
-            parseResult = patternResult
+            console.log('AI raw response:', aiResult.rawResponse?.substring(0, 500))
+            // Add AI error info to pattern result metadata for debugging
+            parseResult = {
+              ...patternResult,
+              metadata: {
+                ...patternResult.metadata,
+                aiError: aiResult.error,
+                aiAttempted: true,
+              },
+            }
           }
         } else {
           parseResult = patternResult
@@ -369,6 +378,8 @@ export async function POST(request: NextRequest) {
       // Debug: include sample of raw items before processing
       debug: {
         sampleItems: parseResult.items.slice(0, 3),
+        aiError: parseResult.metadata?.aiError,
+        aiAttempted: parseResult.metadata?.aiAttempted,
       },
     })
   } catch (error) {
