@@ -43,8 +43,10 @@ export interface ParsedLoad {
   length: number
   width: number
   height: number
-  // Weight in pounds
+  // Weight in pounds (heaviest single item for truck selection)
   weight: number
+  // Total weight of all items (for multi-truck planning)
+  totalWeight?: number
   // Location info
   origin?: string
   destination?: string

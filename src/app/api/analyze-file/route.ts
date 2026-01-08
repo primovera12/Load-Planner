@@ -64,26 +64,28 @@ function calculateConfidence(items: LoadItem[], parseMethod: string): number {
 function toParsedLoad(result: UniversalParseResult, parseMethod: string = 'pattern'): ParsedLoad {
   const items = result.items.map(toLoadItem)
 
-  // Calculate overall dimensions from all items
-  // Length: max (items placed end-to-end or side-by-side)
+  // Calculate dimensions for truck recommendations
+  // Use MAX dimensions - truck selection is based on the largest single item
+  // Length: max (longest item determines truck length requirement)
   const length = items.length > 0 ? Math.max(...items.map(i => i.length)) : 0
-  // Width: max (widest item determines load width)
+  // Width: max (widest item determines width permits)
   const width = items.length > 0 ? Math.max(...items.map(i => i.width)) : 0
-  // Height: SUM all heights (conservative - assumes stacked cargo for permits)
-  const height = items.length > 0
-    ? items.reduce((sum, i) => sum + i.height * i.quantity, 0)
-    : 0
-  // Weight: sum all weights with quantities
-  const weight = items.reduce((sum, i) => sum + i.weight * i.quantity, 0)
+  // Height: MAX (tallest item determines deck height requirement)
+  const height = items.length > 0 ? Math.max(...items.map(i => i.height)) : 0
+  // Weight: max single item weight for truck capacity (total weight is for multi-truck planning)
+  const maxItemWeight = items.length > 0 ? Math.max(...items.map(i => i.weight)) : 0
+  // Total weight of all items (for information/multi-truck planning)
+  const totalWeight = items.reduce((sum, i) => sum + i.weight * i.quantity, 0)
 
   return {
     length,
     width,
     height,
-    weight,
+    weight: maxItemWeight, // Use heaviest single item for truck recommendation
     items,
     description: items.map(i => i.description).join(', ').slice(0, 100),
     confidence: calculateConfidence(items, parseMethod),
+    totalWeight, // Include total weight for planning
   }
 }
 
