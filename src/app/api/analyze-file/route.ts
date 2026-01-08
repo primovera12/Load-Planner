@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { parseSpreadsheet, parsePDFText, parseText, UniversalParseResult, ParsedItem } from '@/lib/universal-parser'
 import { parseImageWithAI, parseTextWithAI } from '@/lib/ai-vision-parser'
 import { selectTrucks } from '@/lib/truck-selector'
+import { planLoads, LoadPlan } from '@/lib/load-planner'
 import { ParsedLoad, LoadItem } from '@/types/load'
 import { TruckRecommendation } from '@/types/truck'
 // pdf-parse is dynamically imported only when needed to avoid serverless compatibility issues
@@ -347,10 +348,26 @@ export async function POST(request: NextRequest) {
     // Convert to ParsedLoad format
     const parsedLoad = toParsedLoad(parseResult, parseMethod)
 
-    // Get truck recommendations
+    // Get truck recommendations (legacy - for single largest item)
     let recommendations: TruckRecommendation[] = []
     if (parsedLoad.length > 0 || parsedLoad.width > 0 || parsedLoad.height > 0 || parsedLoad.weight > 0) {
       recommendations = selectTrucks(parsedLoad)
+    }
+
+    // Generate full load plan (multi-truck planning)
+    let loadPlan: LoadPlan | null = null
+    if (parsedLoad.items.length > 0) {
+      loadPlan = planLoads(parsedLoad)
+      console.log('Load plan generated:', {
+        totalTrucks: loadPlan.totalTrucks,
+        totalWeight: loadPlan.totalWeight,
+        loads: loadPlan.loads.map(l => ({
+          id: l.id,
+          truck: l.recommendedTruck.name,
+          items: l.items.length,
+          weight: l.weight,
+        })),
+      })
     }
 
     // Build enhanced metadata with parsing details
@@ -362,21 +379,27 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate helpful error/warning messages
-    let warning: string | undefined
+    const warnings: string[] = []
     if (parseResult.items.length === 0) {
-      warning = 'No cargo items could be extracted. Please check your file format or try pasting the text directly.'
+      warnings.push('No cargo items could be extracted. Please check your file format or try pasting the text directly.')
     } else if (parsedLoad.confidence < 50) {
-      warning = 'Low confidence parsing. Some dimensions or weights may be missing. Please review the extracted data.'
+      warnings.push('Low confidence parsing. Some dimensions or weights may be missing. Please review the extracted data.')
+    }
+    // Add load plan warnings
+    if (loadPlan?.warnings) {
+      warnings.push(...loadPlan.warnings)
     }
 
     return NextResponse.json({
       success: parseResult.success && parseResult.items.length > 0,
       parsedLoad,
-      recommendations,
+      recommendations, // Legacy single-truck recommendations
+      loadPlan, // New multi-truck load plan
       metadata: enhancedMetadata,
       rawText: parseResult.rawText,
       error: parseResult.error,
-      warning,
+      warning: warnings.length > 0 ? warnings.join(' | ') : undefined,
+      warnings, // Array of all warnings
       // Debug: include sample of raw items before processing
       debug: {
         sampleItems: parseResult.items.slice(0, 3),
