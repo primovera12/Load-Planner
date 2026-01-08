@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 import {
   Truck,
   LayoutDashboard,
@@ -12,20 +13,48 @@ import {
   Settings,
   Box,
   FileSpreadsheet,
+  Users,
+  LogIn,
 } from 'lucide-react'
 
+// Check if Clerk is properly configured
+const isClerkConfigured = () => {
+  const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+  return key && key !== 'pk_test_your_key_here' && key.startsWith('pk_')
+}
+
+// Conditionally import Clerk components
+let SignInButton: React.ComponentType<{ mode?: string; children: React.ReactNode }> | null = null
+let SignedIn: React.ComponentType<{ children: React.ReactNode }> | null = null
+let SignedOut: React.ComponentType<{ children: React.ReactNode }> | null = null
+let UserButton: React.ComponentType<{ afterSignOutUrl?: string; appearance?: object }> | null = null
+
+if (isClerkConfigured()) {
+  try {
+    const clerk = require('@clerk/nextjs')
+    SignInButton = clerk.SignInButton
+    SignedIn = clerk.SignedIn
+    SignedOut = clerk.SignedOut
+    UserButton = clerk.UserButton
+  } catch {
+    // Clerk not available
+  }
+}
+
 const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, protected: true },
   { name: 'Analyze', href: '/analyze', icon: ScanSearch },
   { name: 'Trucks', href: '/trucks', icon: Truck },
   { name: 'Routes', href: '/routes', icon: Route },
   { name: 'Visualize', href: '/visualize', icon: Box },
   { name: 'Import', href: '/import', icon: FileSpreadsheet },
-  { name: 'Quotes', href: '/quotes', icon: FileText, disabled: true },
+  { name: 'Customers', href: '/customers', icon: Users, protected: true },
+  { name: 'Quotes', href: '/quotes', icon: FileText, protected: true },
 ]
 
 export function Navigation() {
   const pathname = usePathname()
+  const clerkEnabled = isClerkConfigured()
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
@@ -49,39 +78,100 @@ export function Navigation() {
             const isActive = pathname === item.href
             const Icon = item.icon
 
+            // For protected routes when Clerk is enabled, wrap in SignedIn
+            if (item.protected && clerkEnabled && SignedIn) {
+              return (
+                <SignedIn key={item.name}>
+                  <Link
+                    href={item.href}
+                    className={cn(
+                      'flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                      isActive
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {item.name}
+                  </Link>
+                </SignedIn>
+              )
+            }
+
+            // When Clerk is not enabled, show protected routes with "Coming Soon" badge
+            if (item.protected && !clerkEnabled) {
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className={cn(
+                    'flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                    isActive
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.name}
+                </Link>
+              )
+            }
+
             return (
               <Link
                 key={item.name}
-                href={item.disabled ? '#' : item.href}
+                href={item.href}
                 className={cn(
                   'flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                   isActive
                     ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                  item.disabled && 'opacity-50 cursor-not-allowed'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 )}
-                onClick={(e) => item.disabled && e.preventDefault()}
               >
                 <Icon className="h-4 w-4" />
                 {item.name}
-                {item.disabled && (
-                  <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">
-                    Soon
-                  </span>
-                )}
               </Link>
             )
           })}
         </nav>
 
-        {/* Right side */}
-        <div className="ml-auto flex items-center gap-2">
-          <Link
-            href="/settings"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          >
-            <Settings className="h-4 w-4" />
-          </Link>
+        {/* Right side - Auth */}
+        <div className="ml-auto flex items-center gap-3">
+          {clerkEnabled && SignedOut && SignInButton ? (
+            <SignedOut>
+              <SignInButton mode="modal">
+                <Button variant="outline" size="sm" className="gap-2">
+                  <LogIn className="h-4 w-4" />
+                  Sign In
+                </Button>
+              </SignInButton>
+            </SignedOut>
+          ) : !clerkEnabled ? (
+            <Link href="/sign-in">
+              <Button variant="outline" size="sm" className="gap-2">
+                <LogIn className="h-4 w-4" />
+                Sign In
+              </Button>
+            </Link>
+          ) : null}
+          {clerkEnabled && SignedIn && UserButton ? (
+            <SignedIn>
+              <Link
+                href="/settings"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <Settings className="h-4 w-4" />
+              </Link>
+              <UserButton
+                afterSignOutUrl="/"
+                appearance={{
+                  elements: {
+                    avatarBox: 'h-9 w-9',
+                  },
+                }}
+              />
+            </SignedIn>
+          ) : null}
         </div>
       </div>
     </header>

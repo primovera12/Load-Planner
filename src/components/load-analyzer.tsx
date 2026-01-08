@@ -9,7 +9,7 @@ import { ParsedLoadDisplay } from './parsed-load-display'
 import { TruckRecommendationList } from './truck-recommendation'
 import { AnalyzeResponse } from '@/types'
 import { sampleEmails } from '@/data/sample-emails'
-import { Loader2, Sparkles, FileText, Box } from 'lucide-react'
+import { Loader2, Sparkles, FileText, Box, Route } from 'lucide-react'
 
 export function LoadAnalyzer() {
   const router = useRouter()
@@ -58,6 +58,36 @@ export function LoadAnalyzer() {
 
     // Navigate to visualize page
     router.push('/visualize')
+  }
+
+  const planRoute = () => {
+    if (!result?.parsedLoad) return
+
+    // Get the cargo dimensions (use first item or main dimensions)
+    const cargo = result.parsedLoad.items.length > 0
+      ? {
+          width: Math.max(...result.parsedLoad.items.map(i => i.width)),
+          height: Math.max(...result.parsedLoad.items.map(i => i.height)),
+          length: result.parsedLoad.items.reduce((sum, i) => sum + i.length, 0),
+          weight: result.parsedLoad.items.reduce((sum, i) => sum + i.weight, 0),
+        }
+      : {
+          width: result.parsedLoad.width,
+          height: result.parsedLoad.height,
+          length: result.parsedLoad.length,
+          weight: result.parsedLoad.weight,
+        }
+
+    // Store in sessionStorage for the routes page to pick up
+    sessionStorage.setItem('route-cargo', JSON.stringify({
+      source: 'analyze',
+      cargo,
+      origin: result.parsedLoad.origin || '',
+      destination: result.parsedLoad.destination || '',
+    }))
+
+    // Navigate to routes page
+    router.push('/routes')
   }
 
   const analyzeEmail = async () => {
@@ -176,7 +206,7 @@ To: Dallas, TX"
       {/* Results Section */}
       {result && result.parsedLoad && (
         <div className="space-y-6">
-          {/* Visualize Button */}
+          {/* Action Buttons */}
           {result.recommendations.length > 0 && (
             <Card className="border-primary/20 bg-primary/5">
               <CardContent className="flex items-center justify-between py-4">
@@ -185,16 +215,22 @@ To: Dallas, TX"
                     <Box className="h-5 w-5 text-primary" />
                   </div>
                   <div>
-                    <p className="font-medium">Ready to Visualize</p>
+                    <p className="font-medium">Ready to Continue</p>
                     <p className="text-sm text-muted-foreground">
-                      View your cargo on a {result.recommendations[0]?.truck.name || 'trailer'} in 3D
+                      Visualize in 3D or plan your route with permits
                     </p>
                   </div>
                 </div>
-                <Button onClick={visualizeLoad} size="lg">
-                  <Box className="mr-2 h-4 w-4" />
-                  Visualize in 3D
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button onClick={planRoute} variant="outline" size="lg">
+                    <Route className="mr-2 h-4 w-4" />
+                    Plan Route
+                  </Button>
+                  <Button onClick={visualizeLoad} size="lg">
+                    <Box className="mr-2 h-4 w-4" />
+                    Visualize in 3D
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}

@@ -18,7 +18,14 @@
       "Bash(npm run build:*)",
       "Bash(timeout /t 5 /nobreak)",
       "Bash(npx vercel:*)",
-      "Bash(cd /c/Users/USER/Desktop/websites/1 LIVE/Load Planner)"
+      "Bash(cd /c/Users/USER/Desktop/websites/1 LIVE/Load Planner)",
+      "Bash(npx shadcn@latest add:*)",
+      "Bash(xargs:*)",
+      "Bash(npx prisma init:*)",
+      "Bash(npx prisma generate:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npx prisma db push:*)",
+      "Bash(cat:*)"
     ]
   }
 }

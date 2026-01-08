@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,8 +30,38 @@ import {
   Fuel,
   ToggleLeft,
   ToggleRight,
+  Save,
+  Star,
+  History,
+  Trash2,
+  Share2,
+  Printer,
+  Download,
+  ExternalLink,
+  Copy,
+  Check,
+  X,
+  Coins,
+  Package,
 } from 'lucide-react'
 import { RoutePermitSummary, PermitRequirement } from '@/types'
+import {
+  getSavedRoutes,
+  saveRoute,
+  deleteRoute,
+  toggleFavorite,
+  formatRouteDate,
+  generateShareableUrl,
+  parseRouteFromUrl,
+  CARGO_PRESETS,
+  estimateTolls,
+  checkSeasonalRestrictions,
+  type SavedRoute,
+  type CargoPreset,
+} from '@/lib/route-storage'
+import { printPermitSummary, downloadPermitSummary } from '@/lib/permit-pdf'
+import { statePermits } from '@/data/state-permits'
+import { RouteComparison } from '@/components/route-comparison'
 
 // Dynamically import the map component (client-side only)
 const RouteMap = dynamic(
@@ -83,10 +114,22 @@ interface CostBreakdown {
   permits: number
   escorts: number
   fuel: number
+  tolls: number
   total: number
 }
 
+// Wrap the main component to use searchParams
 export default function RoutesPage() {
+  return (
+    <Suspense fallback={<div className="container mx-auto px-4 py-8">Loading...</div>}>
+      <RoutesPageContent />
+    </Suspense>
+  )
+}
+
+function RoutesPageContent() {
+  const searchParams = useSearchParams()
+
   // Mode toggle
   const [useAutoRoute, setUseAutoRoute] = useState(true)
 
@@ -101,6 +144,10 @@ export default function RoutesPage() {
   const [length, setLength] = useState('32')
   const [weight, setWeight] = useState('72000')
 
+  // Fuel price input
+  const [fuelPrice, setFuelPrice] = useState('4.00')
+  const [showFuelSettings, setShowFuelSettings] = useState(false)
+
   // Results
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -109,6 +156,60 @@ export default function RoutesPage() {
   const [costs, setCosts] = useState<CostBreakdown | null>(null)
   const [mapPoints, setMapPoints] = useState<{ lat: number; lng: number }[]>([])
   const [expandedState, setExpandedState] = useState<string | null>(null)
+
+  // UI state
+  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([])
+  const [showHistory, setShowHistory] = useState(false)
+  const [showPresets, setShowPresets] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+
+  // Load saved routes and URL params on mount
+  useEffect(() => {
+    setSavedRoutes(getSavedRoutes())
+
+    // Check for shared route in URL
+    const urlData = parseRouteFromUrl(searchParams)
+    if (urlData) {
+      if (urlData.origin) setOrigin(urlData.origin)
+      if (urlData.destination) setDestination(urlData.destination)
+      if (urlData.width) setWidth(urlData.width.toString())
+      if (urlData.height) setHeight(urlData.height.toString())
+      if (urlData.length) setLength(urlData.length.toString())
+      if (urlData.weight) setWeight(urlData.weight.toString())
+      if (urlData.states && urlData.states.length > 0) {
+        setSelectedStates(urlData.states)
+        setUseAutoRoute(false)
+      }
+    }
+
+    // Check for cargo from analyze page
+    const analyzeData = sessionStorage.getItem('route-cargo')
+    if (analyzeData) {
+      try {
+        const data = JSON.parse(analyzeData)
+        // Set origin/destination if available
+        if (data.origin) setOrigin(data.origin)
+        if (data.destination) setDestination(data.destination)
+        // Set cargo dimensions
+        if (data.cargo) {
+          if (data.cargo.width) setWidth(data.cargo.width.toString())
+          if (data.cargo.height) setHeight(data.cargo.height.toString())
+          if (data.cargo.length) setLength(data.cargo.length.toString())
+          if (data.cargo.weight) setWeight(data.cargo.weight.toString())
+        }
+        sessionStorage.removeItem('route-cargo')
+      } catch (e) {
+        console.error('Failed to parse analyze cargo data')
+      }
+    }
+  }, [searchParams])
+
+  // Check seasonal restrictions
+  const seasonalStatus = useMemo(() => {
+    if (!results) return null
+    return checkSeasonalRestrictions(results.overallRestrictions)
+  }, [results])
 
   const toggleState = (code: string) => {
     setSelectedStates(prev =>
@@ -158,7 +259,21 @@ export default function RoutesPage() {
       if (data.success) {
         setRouteData(data.data.route)
         setResults(data.data.permits)
-        setCosts(data.data.costs)
+
+        // Calculate tolls based on state distances
+        const tollEstimate = estimateTolls(data.data.route.stateDistances || {})
+
+        // Recalculate fuel with custom price
+        const distance = data.data.route.totalDistance
+        const fuelCost = Math.round((distance / 6) * parseFloat(fuelPrice))
+
+        setCosts({
+          permits: data.data.costs.permits,
+          escorts: data.data.costs.escorts,
+          fuel: fuelCost,
+          tolls: tollEstimate,
+          total: data.data.costs.permits + data.data.costs.escorts + fuelCost + tollEstimate,
+        })
         setMapPoints(data.data.mapPoints || [])
         setSelectedStates(data.data.route.statesTraversed)
       }
@@ -201,6 +316,7 @@ export default function RoutesPage() {
           permits: data.data.totalPermitFees,
           escorts: data.data.totalEscortCost,
           fuel: 0,
+          tolls: 0,
           total: data.data.totalPermitFees + data.data.totalEscortCost,
         })
         setMapPoints([])
@@ -211,6 +327,151 @@ export default function RoutesPage() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // Save current route
+  const handleSaveRoute = () => {
+    if (!results || !costs) return
+
+    const saved = saveRoute({
+      name: `${origin || selectedStates[0]} to ${destination || selectedStates[selectedStates.length - 1]}`,
+      origin: origin || selectedStates[0],
+      destination: destination || selectedStates[selectedStates.length - 1],
+      states: routeData?.statesTraversed || selectedStates,
+      cargo: {
+        width: parseFloat(width),
+        height: parseFloat(height),
+        length: parseFloat(length),
+        weight: parseFloat(weight),
+      },
+      costs: {
+        permits: costs.permits,
+        escorts: costs.escorts,
+        fuel: costs.fuel,
+        tolls: costs.tolls,
+        total: costs.total,
+      },
+      routeData: routeData ? {
+        totalDistance: routeData.totalDistance,
+        totalDuration: routeData.totalDuration,
+        stateDistances: routeData.stateDistances,
+      } : undefined,
+      isFavorite: false,
+    })
+
+    setSavedRoutes(getSavedRoutes())
+    setSaveSuccess(true)
+    setTimeout(() => setSaveSuccess(false), 2000)
+  }
+
+  // Load a saved route
+  const handleLoadRoute = (route: SavedRoute) => {
+    setOrigin(route.origin)
+    setDestination(route.destination)
+    setWidth(route.cargo.width.toString())
+    setHeight(route.cargo.height.toString())
+    setLength(route.cargo.length.toString())
+    setWeight(route.cargo.weight.toString())
+    setSelectedStates(route.states)
+    setShowHistory(false)
+
+    if (route.origin.length > 2 && route.destination.length > 2) {
+      setUseAutoRoute(true)
+    } else {
+      setUseAutoRoute(false)
+    }
+  }
+
+  // Delete a saved route
+  const handleDeleteRoute = (id: string) => {
+    deleteRoute(id)
+    setSavedRoutes(getSavedRoutes())
+  }
+
+  // Apply cargo preset
+  const applyPreset = (preset: CargoPreset) => {
+    setWidth(preset.width.toString())
+    setHeight(preset.height.toString())
+    setLength(preset.length.toString())
+    setWeight(preset.weight.toString())
+    setShowPresets(false)
+  }
+
+  // Copy share link
+  const handleCopyShareLink = async () => {
+    if (!results || !costs) return
+
+    const shareUrl = generateShareableUrl({
+      id: '',
+      name: '',
+      createdAt: '',
+      origin,
+      destination,
+      states: routeData?.statesTraversed || selectedStates,
+      cargo: {
+        width: parseFloat(width),
+        height: parseFloat(height),
+        length: parseFloat(length),
+        weight: parseFloat(weight),
+      },
+      costs: costs,
+      isFavorite: false,
+    })
+
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
+
+  // Print/download permit summary
+  const handlePrint = () => {
+    if (!results || !costs) return
+
+    printPermitSummary({
+      origin: origin || selectedStates[0],
+      destination: destination || selectedStates[selectedStates.length - 1],
+      cargo: {
+        width: parseFloat(width),
+        height: parseFloat(height),
+        length: parseFloat(length),
+        weight: parseFloat(weight),
+      },
+      route: routeData ? {
+        totalDistance: routeData.totalDistance,
+        totalDuration: routeData.totalDuration,
+        statesTraversed: routeData.statesTraversed,
+      } : undefined,
+      permits: results,
+      costs: costs,
+      fuelPrice: parseFloat(fuelPrice),
+    })
+  }
+
+  const handleDownload = () => {
+    if (!results || !costs) return
+
+    downloadPermitSummary({
+      origin: origin || selectedStates[0],
+      destination: destination || selectedStates[selectedStates.length - 1],
+      cargo: {
+        width: parseFloat(width),
+        height: parseFloat(height),
+        length: parseFloat(length),
+        weight: parseFloat(weight),
+      },
+      route: routeData ? {
+        totalDistance: routeData.totalDistance,
+        totalDuration: routeData.totalDuration,
+        statesTraversed: routeData.statesTraversed,
+      } : undefined,
+      permits: results,
+      costs: costs,
+      fuelPrice: parseFloat(fuelPrice),
+    })
   }
 
   const handleCalculate = () => {
@@ -235,15 +496,159 @@ export default function RoutesPage() {
       <div className="mx-auto max-w-7xl">
         {/* Page Header */}
         <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-              <Route className="h-5 w-5 text-primary" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <Route className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight">Route Planner</h1>
+                <p className="text-sm text-muted-foreground">
+                  Calculate permit requirements and costs for multi-state routes
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight">Route Planner</h1>
-              <p className="text-sm text-muted-foreground">
-                Calculate permit requirements and costs for multi-state routes
-              </p>
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-2">
+              {/* Route History */}
+              <div className="relative">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowHistory(!showHistory)}
+                  className="gap-2"
+                >
+                  <History className="h-4 w-4" />
+                  History
+                  {savedRoutes.length > 0 && (
+                    <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 justify-center">
+                      {savedRoutes.length}
+                    </Badge>
+                  )}
+                </Button>
+
+                {showHistory && (
+                  <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg border shadow-lg z-50 max-h-96 overflow-y-auto">
+                    <div className="p-3 border-b">
+                      <div className="font-medium">Saved Routes</div>
+                    </div>
+                    {savedRoutes.length === 0 ? (
+                      <div className="p-4 text-sm text-muted-foreground text-center">
+                        No saved routes yet
+                      </div>
+                    ) : (
+                      <div className="divide-y">
+                        {savedRoutes.map((route) => (
+                          <div
+                            key={route.id}
+                            className="p-3 hover:bg-slate-50 cursor-pointer"
+                            onClick={() => handleLoadRoute(route)}
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  {route.isFavorite && (
+                                    <Star className="h-3 w-3 text-amber-500 fill-amber-500" />
+                                  )}
+                                  <span className="font-medium text-sm truncate">
+                                    {route.origin} → {route.destination}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {route.states.join(' → ')}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  ${route.costs.total.toLocaleString()} • {formatRouteDate(route.createdAt)}
+                                </div>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 text-slate-400 hover:text-red-500"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDeleteRoute(route.id)
+                                }}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Route Comparison - show when 2+ saved routes */}
+              {savedRoutes.length >= 2 && (
+                <RouteComparison savedRoutes={savedRoutes} />
+              )}
+
+              {/* Results Actions - only show when results exist */}
+              {results && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSaveRoute}
+                    className="gap-2"
+                  >
+                    {saveSuccess ? (
+                      <>
+                        <Check className="h-4 w-4 text-green-500" />
+                        Saved!
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4" />
+                        Save
+                      </>
+                    )}
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCopyShareLink}
+                    className="gap-2"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="h-4 w-4 text-green-500" />
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <Share2 className="h-4 w-4" />
+                        Share
+                      </>
+                    )}
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handlePrint}
+                    className="gap-2"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownload}
+                    className="gap-2"
+                  >
+                    <Download className="h-4 w-4" />
+                    Export
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -379,10 +784,52 @@ export default function RoutesPage() {
             {/* Cargo Specifications */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Truck className="h-5 w-5" />
-                  Cargo Specifications
-                </CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Truck className="h-5 w-5" />
+                    Cargo Specifications
+                  </CardTitle>
+                  {/* Presets dropdown */}
+                  <div className="relative">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowPresets(!showPresets)}
+                      className="gap-1 text-xs"
+                    >
+                      <Package className="h-3 w-3" />
+                      Presets
+                      <ChevronDown className="h-3 w-3" />
+                    </Button>
+
+                    {showPresets && (
+                      <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg border shadow-lg z-50 max-h-80 overflow-y-auto">
+                        <div className="p-2 border-b text-xs font-medium text-muted-foreground">
+                          Quick-fill cargo dimensions
+                        </div>
+                        {(['construction', 'industrial', 'agriculture'] as const).map((category) => (
+                          <div key={category}>
+                            <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground bg-slate-50 capitalize">
+                              {category}
+                            </div>
+                            {CARGO_PRESETS.filter(p => p.category === category).map((preset) => (
+                              <button
+                                key={preset.id}
+                                onClick={() => applyPreset(preset)}
+                                className="w-full px-3 py-2 text-left hover:bg-slate-50 transition-colors"
+                              >
+                                <div className="font-medium text-sm">{preset.name}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {preset.width}&apos; × {preset.height}&apos; × {preset.length}&apos; • {preset.weight.toLocaleString()} lbs
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -471,6 +918,34 @@ export default function RoutesPage() {
               </CardContent>
             </Card>
 
+            {/* Fuel Price Settings */}
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Fuel className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">Fuel Price</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">$</span>
+                    <Input
+                      type="number"
+                      step="0.10"
+                      min="1"
+                      max="10"
+                      value={fuelPrice}
+                      onChange={(e) => setFuelPrice(e.target.value)}
+                      className="w-20 h-8 text-sm"
+                    />
+                    <span className="text-sm text-muted-foreground">/gal</span>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Fuel estimate based on 6 MPG average
+                </p>
+              </CardContent>
+            </Card>
+
             {error && (
               <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
                 {error}
@@ -542,7 +1017,7 @@ export default function RoutesPage() {
                 )}
 
                 {/* Cost Summary Cards */}
-                <div className="grid gap-4 sm:grid-cols-4">
+                <div className="grid gap-4 sm:grid-cols-5">
                   <Card>
                     <CardContent className="pt-6">
                       <div className="flex items-center justify-between">
@@ -574,7 +1049,7 @@ export default function RoutesPage() {
                       <CardContent className="pt-6">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm text-muted-foreground">Fuel (Est.)</p>
+                            <p className="text-sm text-muted-foreground">Fuel</p>
                             <p className="text-2xl font-bold">
                               ${costs.fuel.toLocaleString()}
                             </p>
@@ -584,7 +1059,22 @@ export default function RoutesPage() {
                       </CardContent>
                     </Card>
                   ) : null}
-                  <Card className={costs?.fuel ? '' : 'sm:col-span-2'}>
+                  {costs?.tolls ? (
+                    <Card>
+                      <CardContent className="pt-6">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm text-muted-foreground">Tolls</p>
+                            <p className="text-2xl font-bold">
+                              ${costs.tolls.toLocaleString()}
+                            </p>
+                          </div>
+                          <Coins className="h-8 w-8 text-muted-foreground" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ) : null}
+                  <Card>
                     <CardContent className="pt-6">
                       <div className="flex items-center justify-between">
                         <div>
@@ -598,6 +1088,44 @@ export default function RoutesPage() {
                     </CardContent>
                   </Card>
                 </div>
+
+                {/* Active Seasonal Restrictions Alert */}
+                {seasonalStatus && seasonalStatus.active.length > 0 && (
+                  <Card className="border-red-200 bg-red-50">
+                    <CardContent className="pt-6">
+                      <div className="flex items-start gap-3">
+                        <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5" />
+                        <div>
+                          <div className="font-medium text-red-800 mb-2">Active Travel Restrictions</div>
+                          <ul className="space-y-1 text-sm text-red-700">
+                            {seasonalStatus.active.map((r, idx) => (
+                              <li key={idx}>• {r}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Upcoming Restrictions */}
+                {seasonalStatus && seasonalStatus.upcoming.length > 0 && (
+                  <Card className="border-amber-200 bg-amber-50">
+                    <CardContent className="pt-6">
+                      <div className="flex items-start gap-3">
+                        <Clock className="h-5 w-5 text-amber-600 mt-0.5" />
+                        <div>
+                          <div className="font-medium text-amber-800 mb-2">Upcoming Restrictions</div>
+                          <ul className="space-y-1 text-sm text-amber-700">
+                            {seasonalStatus.upcoming.map((r, idx) => (
+                              <li key={idx}>• {r}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* Warnings */}
                 {results.warnings.length > 0 && (
@@ -700,6 +1228,9 @@ function StatePermitCard({
 }) {
   const hasIssues = permit.oversizeRequired || permit.overweightRequired || permit.escortsRequired > 0
 
+  // Get state permit info for application link
+  const stateInfo = statePermits.find(s => s.stateCode === permit.stateCode)
+
   return (
     <div className={`rounded-lg border ${hasIssues ? 'border-amber-200' : 'border-slate-200'}`}>
       <button
@@ -782,6 +1313,39 @@ function StatePermitCard({
                   <li key={idx}>• {r}</li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {/* Permit Application Link */}
+          {stateInfo?.contact && (permit.oversizeRequired || permit.overweightRequired) && (
+            <div className="pt-2 border-t border-slate-200">
+              <div className="text-sm font-medium mb-2">Apply for Permit</div>
+              <div className="flex flex-wrap gap-2">
+                {stateInfo.contact.website && (
+                  <a
+                    href={stateInfo.contact.website}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    {stateInfo.contact.agency || `${permit.stateCode} DOT`}
+                  </a>
+                )}
+                {stateInfo.contact.phone && (
+                  <a
+                    href={`tel:${stateInfo.contact.phone}`}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-200 text-slate-700 rounded-md hover:bg-slate-300 transition-colors"
+                  >
+                    {stateInfo.contact.phone}
+                  </a>
+                )}
+              </div>
+              {stateInfo?.oversizePermits?.singleTrip?.processingTime && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  Processing time: {stateInfo.oversizePermits.singleTrip.processingTime}
+                </p>
+              )}
             </div>
           )}
         </div>
