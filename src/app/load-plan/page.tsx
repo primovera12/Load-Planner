@@ -6,42 +6,46 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { EditableCargoTable } from '@/components/editable-cargo-table'
 import { AnalyzeResponse, LoadItem } from '@/types/load'
+import { PlannedLoad } from '@/lib/load-planner'
 import {
   Loader2,
   ArrowLeft,
-  Box,
-  Route,
-  Truck,
   Download,
   MapPin,
-  Ruler,
-  FileWarning,
   CheckCircle2,
-  Sparkles,
   AlertCircle,
-  Package,
-  Weight,
-  RefreshCw,
+  Info,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
+
+// Color palette matching Cargo-Planner
+const ITEM_COLORS = [
+  '#9B59B6', // Purple
+  '#1ABC9C', // Teal
+  '#3498DB', // Blue
+  '#E74C3C', // Red
+  '#F39C12', // Orange
+  '#2ECC71', // Green
+  '#E91E63', // Pink
+  '#00BCD4', // Cyan
+  '#FF5722', // Deep Orange
+  '#795548', // Brown
+]
 
 export default function LoadPlanPage() {
   const router = useRouter()
   const [result, setResult] = useState<AnalyzeResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isDownloadingPDF, setIsDownloadingPDF] = useState(false)
-  const [isRecalculating, setIsRecalculating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [expandedTrailers, setExpandedTrailers] = useState<Set<number>>(new Set())
 
   // Origin/destination state
   const [origin, setOrigin] = useState('')
   const [destination, setDestination] = useState('')
   const [showLocationPrompt, setShowLocationPrompt] = useState(false)
-
-  // Editable items state
-  const [editedItems, setEditedItems] = useState<LoadItem[] | null>(null)
-  const [hasEdits, setHasEdits] = useState(false)
 
   // Load data from session storage on mount
   useEffect(() => {
@@ -50,9 +54,6 @@ export default function LoadPlanPage() {
       try {
         const data = JSON.parse(storedData) as AnalyzeResponse
         setResult(data)
-        if (data.parsedLoad?.items) {
-          setEditedItems(data.parsedLoad.items)
-        }
         // Check if origin/destination is missing
         const hasOrigin = data.parsedLoad?.origin && data.parsedLoad.origin.trim() !== ''
         const hasDest = data.parsedLoad?.destination && data.parsedLoad.destination.trim() !== ''
@@ -60,6 +61,9 @@ export default function LoadPlanPage() {
           setShowLocationPrompt(true)
           if (hasOrigin) setOrigin(data.parsedLoad?.origin || '')
           if (hasDest) setDestination(data.parsedLoad?.destination || '')
+        } else {
+          setOrigin(data.parsedLoad?.origin || '')
+          setDestination(data.parsedLoad?.destination || '')
         }
       } catch (e) {
         console.error('Failed to parse load plan data:', e)
@@ -71,45 +75,14 @@ export default function LoadPlanPage() {
     setIsLoading(false)
   }, [])
 
-  const currentItems = editedItems || result?.parsedLoad?.items || []
-
-  // Handle items being edited
-  const handleItemsChange = (newItems: LoadItem[]) => {
-    setEditedItems(newItems)
-    setHasEdits(true)
-  }
-
-  // Recalculate load plan with edited items
-  const recalculateLoadPlan = async () => {
-    if (!editedItems || editedItems.length === 0) return
-
-    setIsRecalculating(true)
-    try {
-      const formData = new FormData()
-      // Send items as JSON text for re-analysis
-      const itemsText = editedItems.map(item =>
-        `${item.description}: ${item.length}'L x ${item.width}'W x ${item.height}'H, ${item.weight} lbs, qty ${item.quantity}`
-      ).join('\n')
-      formData.append('text', itemsText)
-
-      const response = await fetch('/api/analyze-file', {
-        method: 'POST',
-        body: formData,
-      })
-
-      const data = await response.json()
-      if (data.success) {
-        setResult(data)
-        setEditedItems(data.parsedLoad?.items || editedItems)
-        setHasEdits(false)
-        // Update session storage
-        sessionStorage.setItem('load-plan-result', JSON.stringify(data))
-      }
-    } catch (err) {
-      setError('Failed to recalculate load plan')
-    } finally {
-      setIsRecalculating(false)
+  const toggleTrailerExpanded = (index: number) => {
+    const newExpanded = new Set(expandedTrailers)
+    if (newExpanded.has(index)) {
+      newExpanded.delete(index)
+    } else {
+      newExpanded.add(index)
     }
+    setExpandedTrailers(newExpanded)
   }
 
   // Download PDF
@@ -117,6 +90,7 @@ export default function LoadPlanPage() {
     if (!result?.loadPlan || result.loadPlan.loads.length === 0) return
 
     setIsDownloadingPDF(true)
+    setError(null)
     try {
       const response = await fetch('/api/generate-load-plan-pdf', {
         method: 'POST',
@@ -124,7 +98,7 @@ export default function LoadPlanPage() {
         body: JSON.stringify({
           loadPlan: result.loadPlan,
           options: {
-            title: 'Load Plan',
+            title: result.parsedLoad?.description || 'Load Plan',
             reference: `LP-${Date.now()}`,
             date: new Date().toLocaleDateString(),
             origin: origin || result.parsedLoad?.origin || 'Not specified',
@@ -134,7 +108,8 @@ export default function LoadPlanPage() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to generate PDF')
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || 'Failed to generate PDF')
       }
 
       const blob = await response.blob()
@@ -153,68 +128,23 @@ export default function LoadPlanPage() {
     }
   }
 
-  // Navigate to 3D visualization
-  const visualizeLoad = (loadIndex?: number) => {
-    const colors = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899']
+  // Calculate totals
+  const totalItems = result?.loadPlan?.totalItems || 0
+  const totalWeight = result?.loadPlan?.totalWeight || 0
+  const totalTrucks = result?.loadPlan?.totalTrucks || 0
+  const oogCount = result?.loadPlan?.loads.filter(l => !l.isLegal).length || 0
 
-    let trailerType: 'flatbed' | 'step-deck' | 'rgn' | 'lowboy' | 'double-drop' = 'step-deck'
-    let itemsToVisualize = currentItems
+  // Calculate total volume
+  const totalVolume = result?.loadPlan?.loads.reduce((sum, load) => {
+    return sum + load.items.reduce((v, item) => v + (item.length * item.width * item.height), 0)
+  }, 0) || 0
 
-    if (result?.loadPlan && result.loadPlan.loads.length > 0) {
-      const loadIdx = loadIndex ?? 0
-      const load = result.loadPlan.loads[loadIdx]
-      trailerType = load.recommendedTruck.category.toLowerCase().replace('_', '-') as typeof trailerType
-      itemsToVisualize = load.items
-    }
-
-    const cargoItems = itemsToVisualize.map((item, index) => ({
-      id: item.id || `cargo-${Date.now()}-${index}`,
-      name: item.description || `Item ${index + 1}`,
-      width: item.width,
-      height: item.height,
-      length: item.length,
-      weight: item.weight,
-      color: item.color || colors[index % colors.length],
-      position: [0, 0, 0] as [number, number, number],
-    }))
-
-    sessionStorage.setItem('visualize-cargo', JSON.stringify({
-      trailerType,
-      cargo: cargoItems,
-      loadPlan: result?.loadPlan,
-      source: 'load-plan',
-    }))
-
-    router.push('/visualize')
-  }
-
-  // Navigate to route planning
-  const planRoute = () => {
-    if (!result?.parsedLoad) return
-
-    const cargo = currentItems.length > 0
-      ? {
-          width: Math.max(...currentItems.map(i => i.width)),
-          height: Math.max(...currentItems.map(i => i.height)),
-          length: currentItems.reduce((sum, i) => sum + i.length, 0),
-          weight: currentItems.reduce((sum, i) => sum + i.weight, 0),
-        }
-      : {
-          width: result.parsedLoad.width,
-          height: result.parsedLoad.height,
-          length: result.parsedLoad.length,
-          weight: result.parsedLoad.weight,
-        }
-
-    sessionStorage.setItem('route-cargo', JSON.stringify({
-      source: 'load-plan',
-      cargo,
-      origin: origin || result.parsedLoad.origin || '',
-      destination: destination || result.parsedLoad.destination || '',
-    }))
-
-    router.push('/routes')
-  }
+  // Count trailer types
+  const trailerTypeCounts: Record<string, number> = {}
+  result?.loadPlan?.loads.forEach(load => {
+    const type = load.recommendedTruck.name
+    trailerTypeCounts[type] = (trailerTypeCounts[type] || 0) + 1
+  })
 
   if (isLoading) {
     return (
@@ -246,47 +176,7 @@ export default function LoadPlanPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.push('/analyze')}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-3xl font-bold">Load Plan</h1>
-            <p className="text-muted-foreground">
-              {result?.loadPlan?.totalTrucks || 0} truck(s) • {result?.loadPlan?.totalWeight?.toLocaleString() || 0} lbs total
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {result?.metadata?.parseMethod === 'AI' && (
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
-              <Sparkles className="h-4 w-4 mr-1" />
-              AI Parsed
-            </span>
-          )}
-          <Button
-            onClick={downloadPDF}
-            disabled={isDownloadingPDF || !result?.loadPlan}
-            variant="outline"
-          >
-            {isDownloadingPDF ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Generating...
-              </>
-            ) : (
-              <>
-                <Download className="h-4 w-4 mr-2" />
-                Download PDF
-              </>
-            )}
-          </Button>
-        </div>
-      </div>
-
+    <div className="container mx-auto px-4 py-6 max-w-6xl">
       {/* Error Message */}
       {error && (
         <div className="flex items-center gap-3 p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 mb-6">
@@ -294,6 +184,67 @@ export default function LoadPlanPage() {
           <p>{error}</p>
         </div>
       )}
+
+      {/* Summary Header - Cargo-Planner Style */}
+      <Card className="mb-6">
+        <CardContent className="p-6">
+          <div className="flex justify-between items-start">
+            {/* Left side - Title and details */}
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <Button variant="ghost" size="icon" onClick={() => router.push('/analyze')} className="h-8 w-8">
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <h1 className="text-2xl font-bold">
+                  {result?.parsedLoad?.description || 'Load Plan'}
+                </h1>
+              </div>
+              {(origin || destination) && (
+                <p className="text-muted-foreground ml-11">
+                  {origin && destination ? `${origin} - ${destination}` : origin || destination}
+                </p>
+              )}
+            </div>
+
+            {/* Right side - Summary stats */}
+            <div className="text-right space-y-1">
+              <p className="font-semibold">
+                {totalTrucks} trailer{totalTrucks !== 1 ? 's' : ''} used
+                {oogCount > 0 && <span className="text-amber-600"> ({oogCount} OoG)</span>}
+              </p>
+              {Object.entries(trailerTypeCounts).map(([type, count]) => (
+                <p key={type} className="text-sm text-muted-foreground">{count} x {type}</p>
+              ))}
+              <p className="text-sm mt-2">
+                <span className="text-green-600 font-medium">{totalItems} items loaded</span>
+                <CheckCircle2 className="inline h-4 w-4 text-green-600 ml-1" />
+              </p>
+              <p className="text-sm font-medium">{totalWeight.toLocaleString()} LB</p>
+              <p className="text-sm text-muted-foreground">{totalVolume.toFixed(1)} FT³</p>
+            </div>
+          </div>
+
+          {/* Download button */}
+          <div className="flex justify-end mt-4 pt-4 border-t">
+            <Button
+              onClick={downloadPDF}
+              disabled={isDownloadingPDF || !result?.loadPlan}
+            >
+              {isDownloadingPDF ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Download className="h-4 w-4 mr-2" />
+                  Download PDF
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Origin/Destination Prompt */}
       {showLocationPrompt && (
@@ -304,7 +255,7 @@ export default function LoadPlanPage() {
               <div>
                 <p className="font-medium text-amber-800">Add Route Information</p>
                 <p className="text-sm text-amber-600">
-                  Origin and destination weren&apos;t found in the document. Add them for route planning and permits.
+                  Origin and destination weren&apos;t found in the document. Add them for route planning.
                 </p>
               </div>
             </div>
@@ -343,365 +294,516 @@ export default function LoadPlanPage() {
         </Card>
       )}
 
-      {/* Summary Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <Card>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-blue-100 rounded-lg">
-              <Truck className="h-6 w-6 text-blue-600" />
+      {/* Trailer Summary Table - Cargo-Planner Style */}
+      {result?.loadPlan && result.loadPlan.loads.length > 0 && (
+        <Card className="mb-6">
+          <CardContent className="p-0">
+            {/* Table Header */}
+            <div className="grid grid-cols-12 gap-4 px-6 py-3 bg-slate-50 border-b text-sm font-medium text-muted-foreground">
+              <div className="col-span-1"></div>
+              <div className="col-span-2">Type</div>
+              <div className="col-span-1 text-center">Pcs</div>
+              <div className="col-span-2">Weight (net)</div>
+              <div className="col-span-2">Volume</div>
+              <div className="col-span-2">Used space</div>
+              <div className="col-span-2">View</div>
             </div>
-            <div>
-              <p className="text-2xl font-bold">{result?.loadPlan?.totalTrucks || 0}</p>
-              <p className="text-sm text-muted-foreground">Trucks Needed</p>
-            </div>
+
+            {/* Table Rows */}
+            {result.loadPlan.loads.map((load, index) => (
+              <TrailerRow
+                key={load.id}
+                load={load}
+                index={index}
+                isExpanded={expandedTrailers.has(index)}
+                onToggle={() => toggleTrailerExpanded(index)}
+              />
+            ))}
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-green-100 rounded-lg">
-              <Package className="h-6 w-6 text-green-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{result?.loadPlan?.totalItems || currentItems.length}</p>
-              <p className="text-sm text-muted-foreground">Total Items</p>
-            </div>
+      )}
+
+      {/* Warnings */}
+      {result?.loadPlan?.warnings && result.loadPlan.warnings.length > 0 && (
+        <Card className="border-amber-200 bg-amber-50 mb-6">
+          <CardContent className="p-4">
+            <p className="font-medium text-amber-800 mb-2">Warnings</p>
+            <ul className="text-sm text-amber-700 space-y-1">
+              {result.loadPlan.warnings.map((warning, i) => (
+                <li key={i}>• {warning}</li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-amber-100 rounded-lg">
-              <Weight className="h-6 w-6 text-amber-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{(result?.loadPlan?.totalWeight || 0).toLocaleString()}</p>
-              <p className="text-sm text-muted-foreground">Total Weight (lbs)</p>
-            </div>
+      )}
+
+      {/* Unassigned Items */}
+      {result?.loadPlan?.unassignedItems && result.loadPlan.unassignedItems.length > 0 && (
+        <Card className="border-red-200 bg-red-50 mb-6">
+          <CardContent className="p-4">
+            <p className="font-medium text-red-800 mb-2">Items Requiring Special Transport</p>
+            <ul className="text-sm text-red-700 space-y-1">
+              {result.loadPlan.unassignedItems.map((item, i) => (
+                <li key={i}>
+                  • {item.description} ({(item.length * 12).toFixed(0)}&quot;L × {(item.width * 12).toFixed(0)}&quot;W × {(item.height * 12).toFixed(0)}&quot;H, {item.weight.toLocaleString()} lbs)
+                </li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="p-3 bg-purple-100 rounded-lg">
-              <Sparkles className="h-6 w-6 text-purple-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{result?.parsedLoad?.confidence || 0}%</p>
-              <p className="text-sm text-muted-foreground">Confidence</p>
-            </div>
-          </CardContent>
-        </Card>
+      )}
+
+      {/* Footer */}
+      <div className="text-center text-sm text-muted-foreground mt-8">
+        Generated by Load Planner
+      </div>
+    </div>
+  )
+}
+
+// Trailer Row Component
+function TrailerRow({
+  load,
+  index,
+  isExpanded,
+  onToggle
+}: {
+  load: PlannedLoad
+  index: number
+  isExpanded: boolean
+  onToggle: () => void
+}) {
+  const volume = load.items.reduce((v, item) => v + (item.length * item.width * item.height), 0)
+  const weightPct = Math.round((load.weight / load.recommendedTruck.maxCargoWeight) * 100)
+
+  return (
+    <div className="border-b last:border-b-0">
+      {/* Summary Row */}
+      <div
+        className="grid grid-cols-12 gap-4 px-6 py-4 items-center hover:bg-slate-50 cursor-pointer"
+        onClick={onToggle}
+      >
+        {/* Number */}
+        <div className="col-span-1 font-bold text-lg">{index + 1}</div>
+
+        {/* Type */}
+        <div className="col-span-2">
+          <p className="font-medium">{load.recommendedTruck.name}</p>
+        </div>
+
+        {/* Pcs */}
+        <div className="col-span-1 text-center">{load.items.length}</div>
+
+        {/* Weight */}
+        <div className="col-span-2">
+          <p className="font-medium">{load.weight.toLocaleString()} LB</p>
+          <p className="text-sm text-muted-foreground">({weightPct}%)</p>
+        </div>
+
+        {/* Volume */}
+        <div className="col-span-2">
+          <p>{volume.toFixed(1)} FT³</p>
+        </div>
+
+        {/* Used Space + OoG indicator */}
+        <div className="col-span-2">
+          {!load.isLegal && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-medium rounded mb-1">
+              <Info className="h-3 w-3" />
+              OoG
+            </span>
+          )}
+          <p className="text-sm">L: {(load.length * 12).toFixed(1)} IN</p>
+          <p className="text-sm">W: {(load.width * 12).toFixed(1)} IN</p>
+          <p className="text-sm">H: {(load.height * 12).toFixed(1)} IN</p>
+        </div>
+
+        {/* View - Mini trailer preview */}
+        <div className="col-span-2 flex items-center gap-2">
+          <MiniTrailerView load={load} />
+          {isExpanded ? (
+            <ChevronUp className="h-5 w-5 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-5 w-5 text-muted-foreground" />
+          )}
+        </div>
       </div>
 
-      {/* Main Content Grid */}
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Left Column - Truck Cards */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold">Trailer Assignments</h2>
-            {hasEdits && (
-              <Button onClick={recalculateLoadPlan} disabled={isRecalculating} variant="outline" size="sm">
-                {isRecalculating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Recalculating...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Recalculate Plan
-                  </>
-                )}
-              </Button>
+      {/* Expanded Detail Section */}
+      {isExpanded && (
+        <TrailerDetailSection load={load} index={index} />
+      )}
+    </div>
+  )
+}
+
+// Mini Trailer View (isometric preview)
+function MiniTrailerView({ load }: { load: PlannedLoad }) {
+  return (
+    <div className="relative w-24 h-16 bg-slate-100 rounded overflow-hidden">
+      {/* Trailer deck */}
+      <div className="absolute bottom-2 left-1 right-6 h-3 bg-slate-400 rounded-sm" />
+
+      {/* Wheels */}
+      <div className="absolute bottom-0 right-2 flex gap-1">
+        <div className="w-2 h-2 bg-slate-600 rounded-full" />
+        <div className="w-2 h-2 bg-slate-600 rounded-full" />
+      </div>
+
+      {/* Gooseneck */}
+      <div className="absolute bottom-2 -left-1 w-4 h-2 bg-slate-300 rounded-sm" />
+
+      {/* Cargo items */}
+      <div className="absolute bottom-5 left-2 right-8 flex gap-0.5 h-8 items-end">
+        {load.items.slice(0, 4).map((item, idx) => {
+          const color = ITEM_COLORS[idx % ITEM_COLORS.length]
+          const heightRatio = Math.min(item.height / 12, 1)
+          return (
+            <div
+              key={item.id}
+              className="flex-1 rounded-sm"
+              style={{
+                backgroundColor: color,
+                height: `${heightRatio * 100}%`,
+                minWidth: '8px',
+              }}
+            />
+          )
+        })}
+        {load.items.length > 4 && (
+          <div className="text-xs text-muted-foreground">...</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Trailer Detail Section
+function TrailerDetailSection({ load, index }: { load: PlannedLoad; index: number }) {
+  const volume = load.items.reduce((v, item) => v + (item.length * item.width * item.height), 0)
+  const weightPct = Math.round((load.weight / load.recommendedTruck.maxCargoWeight) * 100)
+  const totalHeight = load.height + load.recommendedTruck.deckHeight
+  const widthOverhang = Math.max(0, load.width - load.recommendedTruck.deckWidth)
+
+  // Axle weight estimates (45/55 distribution)
+  const frontAxle = Math.round(load.weight * 0.45)
+  const rearAxle = Math.round(load.weight * 0.55)
+
+  return (
+    <div className="px-6 py-6 bg-slate-50 border-t">
+      {/* Header */}
+      <h3 className="text-xl font-bold mb-6">{index + 1} : {load.recommendedTruck.name}</h3>
+
+      {/* Large Isometric View */}
+      <div className="bg-white rounded-lg p-6 mb-6 border">
+        <IsometricTrailerView load={load} />
+      </div>
+
+      {/* Three Views: Top, Side, Front */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="bg-white rounded-lg p-4 border">
+          <p className="text-xs font-medium text-center mb-2 text-muted-foreground">Top View</p>
+          <TopView load={load} />
+        </div>
+        <div className="bg-white rounded-lg p-4 border">
+          <p className="text-xs font-medium text-center mb-2 text-muted-foreground">Side View</p>
+          <SideView load={load} />
+        </div>
+        <div className="bg-white rounded-lg p-4 border">
+          <p className="text-xs font-medium text-center mb-2 text-muted-foreground">Front View</p>
+          <FrontView load={load} />
+        </div>
+      </div>
+
+      {/* Specs Grid - 4 Columns like Cargo-Planner */}
+      <div className="grid grid-cols-4 gap-6 mb-6 p-4 bg-white rounded-lg border">
+        {/* Column 1: Trailer specs */}
+        <div>
+          <h4 className="font-semibold mb-3">{load.recommendedTruck.name}</h4>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-muted-foreground">Inside Length:</span> {(load.recommendedTruck.deckLength * 12).toFixed(0)} IN</p>
+            <p><span className="text-muted-foreground">Inside Width:</span> {(load.recommendedTruck.deckWidth * 12).toFixed(0)} IN</p>
+            <p><span className="text-muted-foreground">Total height:</span> {(load.recommendedTruck.deckHeight * 12).toFixed(0)} IN</p>
+            <p><span className="text-muted-foreground">Payload:</span> {load.recommendedTruck.maxCargoWeight.toLocaleString()} LB</p>
+          </div>
+        </div>
+
+        {/* Column 2: Utilization */}
+        <div>
+          <h4 className="font-semibold mb-3">Utilization</h4>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-muted-foreground">Length:</span> {(load.length * 12).toFixed(1)} IN</p>
+            <p><span className="text-muted-foreground">Width:</span> {(load.width * 12).toFixed(1)} IN</p>
+            <p><span className="text-muted-foreground">Height:</span> {(load.height * 12).toFixed(1)} IN</p>
+            <p><span className="text-muted-foreground">Net Wt:</span> {load.weight.toLocaleString()} LB ({weightPct}%)</p>
+            <p><span className="text-muted-foreground">Volume:</span> {volume.toFixed(3)} FT³</p>
+          </div>
+        </div>
+
+        {/* Column 3: Total */}
+        <div>
+          <h4 className="font-semibold mb-3">Total</h4>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-muted-foreground">Length:</span> {(load.recommendedTruck.deckLength * 12).toFixed(0)} IN</p>
+            <p><span className="text-muted-foreground">Width:</span> {(load.width * 12).toFixed(1)} IN</p>
+            <p><span className="text-muted-foreground">Height:</span> {(totalHeight * 12).toFixed(1)} IN</p>
+            {widthOverhang > 0 && (
+              <>
+                <p><span className="text-muted-foreground">Overhang Side 1:</span> {(widthOverhang * 12 / 2).toFixed(0)} IN</p>
+                <p><span className="text-muted-foreground">Overhang Side 2:</span> {(widthOverhang * 12 / 2).toFixed(0)} IN</p>
+              </>
             )}
           </div>
-
-          {result?.loadPlan && result.loadPlan.loads.length > 0 ? (
-            <div className="space-y-4">
-              {result.loadPlan.loads.map((load, index) => {
-                const colors = ['#9B59B6', '#1ABC9C', '#3498DB', '#E74C3C', '#F39C12', '#2ECC71']
-                const utilizationPct = Math.round((load.weight / load.recommendedTruck.maxCargoWeight) * 100)
-                const totalHeight = load.height + load.recommendedTruck.deckHeight
-
-                return (
-                  <Card key={load.id} className="overflow-hidden">
-                    {/* Header */}
-                    <div className="flex items-center justify-between p-4 bg-slate-50 border-b">
-                      <div className="flex items-center gap-4">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-600 text-white font-bold text-lg">
-                          {index + 1}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-lg">{load.recommendedTruck.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {load.items.length} item{load.items.length > 1 ? 's' : ''} • {load.weight.toLocaleString()} lbs ({utilizationPct}% capacity)
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {!load.isLegal && (
-                          <span className="px-3 py-1 bg-amber-100 text-amber-700 text-sm font-medium rounded-full">
-                            OoG - Permits Required
-                          </span>
-                        )}
-                        {load.isLegal && (
-                          <span className="px-3 py-1 bg-green-100 text-green-700 text-sm font-medium rounded-full flex items-center gap-1">
-                            <CheckCircle2 className="h-4 w-4" />
-                            Legal
-                          </span>
-                        )}
-                        <Button size="sm" onClick={() => visualizeLoad(index)}>
-                          <Box className="h-4 w-4 mr-1" />
-                          View 3D
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Content */}
-                    <CardContent className="p-4">
-                      <div className="grid md:grid-cols-2 gap-6">
-                        {/* Specs */}
-                        <div className="space-y-4">
-                          <div>
-                            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Trailer Specs</p>
-                            <div className="grid grid-cols-2 gap-2 text-sm">
-                              <div>
-                                <span className="text-muted-foreground">Deck Length:</span>
-                                <span className="ml-2 font-medium">{load.recommendedTruck.deckLength}&apos;</span>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Deck Width:</span>
-                                <span className="ml-2 font-medium">{load.recommendedTruck.deckWidth}&apos;</span>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Deck Height:</span>
-                                <span className="ml-2 font-medium">{load.recommendedTruck.deckHeight}&apos;</span>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Max Payload:</span>
-                                <span className="ml-2 font-medium">{load.recommendedTruck.maxCargoWeight.toLocaleString()} lbs</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div>
-                            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Load Dimensions</p>
-                            <div className="grid grid-cols-2 gap-2 text-sm">
-                              <div>
-                                <span className="text-muted-foreground">Length:</span>
-                                <span className="ml-2 font-medium">{load.length.toFixed(1)}&apos;</span>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Width:</span>
-                                <span className={`ml-2 font-medium ${load.width > 8.5 ? 'text-amber-600' : ''}`}>
-                                  {load.width.toFixed(1)}&apos;
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Cargo Height:</span>
-                                <span className="ml-2 font-medium">{load.height.toFixed(1)}&apos;</span>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Total Height:</span>
-                                <span className={`ml-2 font-medium ${totalHeight > 13.5 ? 'text-red-600' : ''}`}>
-                                  {totalHeight.toFixed(1)}&apos;
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {load.permitsRequired.length > 0 && (
-                            <div>
-                              <p className="text-xs font-medium text-amber-600 uppercase tracking-wide mb-2">Permits Required</p>
-                              <ul className="text-sm text-amber-700 space-y-1">
-                                {load.permitsRequired.map((permit, i) => (
-                                  <li key={i} className="flex items-start gap-2">
-                                    <FileWarning className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                                    {permit}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Items */}
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Cargo Items</p>
-                          <div className="space-y-2 max-h-60 overflow-y-auto">
-                            {load.items.map((item, itemIdx) => (
-                              <div
-                                key={item.id}
-                                className="flex items-center gap-3 p-2 bg-slate-50 rounded text-sm"
-                              >
-                                <div
-                                  className="w-4 h-4 rounded flex-shrink-0"
-                                  style={{ backgroundColor: colors[itemIdx % colors.length] }}
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <p className="font-medium truncate">{item.description || `Item ${itemIdx + 1}`}</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {item.length}&apos;L × {item.width}&apos;W × {item.height}&apos;H • {item.weight.toLocaleString()} lbs
-                                    {item.quantity > 1 && ` × ${item.quantity}`}
-                                  </p>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Mini visualization */}
-                      <div className="mt-4 pt-4 border-t">
-                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Load Preview</p>
-                        <div className="relative h-14 bg-slate-200 rounded-lg overflow-hidden">
-                          <div className="absolute inset-0 flex items-center px-3">
-                            {load.items.map((item, itemIdx) => {
-                              const widthPct = Math.min((item.length / load.recommendedTruck.deckLength) * 100, 40)
-                              return (
-                                <div
-                                  key={item.id}
-                                  className="h-10 rounded mr-1 flex items-center justify-center text-white text-xs font-medium shadow-sm"
-                                  style={{
-                                    backgroundColor: colors[itemIdx % colors.length],
-                                    width: `${Math.max(widthPct, 8)}%`,
-                                    minWidth: '35px'
-                                  }}
-                                >
-                                  {itemIdx + 1}
-                                </div>
-                              )
-                            })}
-                          </div>
-                          <div className="absolute bottom-0 right-3 flex gap-1.5">
-                            <div className="w-4 h-4 bg-slate-600 rounded-full" />
-                            <div className="w-4 h-4 bg-slate-600 rounded-full" />
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )
-              })}
-            </div>
-          ) : (
-            <Card>
-              <CardContent className="p-8 text-center">
-                <Truck className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">No load plan generated yet.</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Warnings */}
-          {result?.loadPlan?.warnings && result.loadPlan.warnings.length > 0 && (
-            <Card className="border-amber-200 bg-amber-50">
-              <CardContent className="p-4">
-                <p className="font-medium text-amber-800 mb-2">Warnings</p>
-                <ul className="text-sm text-amber-700 space-y-1">
-                  {result.loadPlan.warnings.map((warning, i) => (
-                    <li key={i}>• {warning}</li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Unassigned Items */}
-          {result?.loadPlan?.unassignedItems && result.loadPlan.unassignedItems.length > 0 && (
-            <Card className="border-red-200 bg-red-50">
-              <CardContent className="p-4">
-                <p className="font-medium text-red-800 mb-2">Items Requiring Special Transport</p>
-                <ul className="text-sm text-red-700 space-y-1">
-                  {result.loadPlan.unassignedItems.map((item, i) => (
-                    <li key={i}>
-                      • {item.description} ({item.length}&apos;L × {item.width}&apos;W × {item.height}&apos;H, {item.weight.toLocaleString()} lbs)
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          )}
         </div>
 
-        {/* Right Column - Actions & Edit */}
-        <div className="space-y-6">
-          {/* Quick Actions */}
-          <Card>
-            <CardContent className="p-4 space-y-3">
-              <h3 className="font-semibold">Quick Actions</h3>
-              <Button onClick={() => visualizeLoad()} className="w-full" size="lg">
-                <Box className="h-5 w-5 mr-2" />
-                Visualize in 3D
-              </Button>
-              <Button onClick={planRoute} variant="outline" className="w-full" size="lg">
-                <Route className="h-5 w-5 mr-2" />
-                Plan Route
-              </Button>
-              <Button
-                onClick={downloadPDF}
-                disabled={isDownloadingPDF || !result?.loadPlan}
-                variant="outline"
-                className="w-full"
-                size="lg"
-              >
-                {isDownloadingPDF ? (
-                  <>
-                    <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Download className="h-5 w-5 mr-2" />
-                    Download PDF
-                  </>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Route Info */}
-          {(origin || destination) && (
-            <Card>
-              <CardContent className="p-4">
-                <h3 className="font-semibold mb-3 flex items-center gap-2">
-                  <MapPin className="h-4 w-4" />
-                  Route
-                </h3>
-                <div className="space-y-2 text-sm">
-                  {origin && (
-                    <div>
-                      <span className="text-muted-foreground">From:</span>
-                      <span className="ml-2 font-medium">{origin}</span>
-                    </div>
-                  )}
-                  {destination && (
-                    <div>
-                      <span className="text-muted-foreground">To:</span>
-                      <span className="ml-2 font-medium">{destination}</span>
-                    </div>
-                  )}
-                </div>
-                <Button
-                  variant="link"
-                  size="sm"
-                  className="p-0 h-auto mt-2"
-                  onClick={() => setShowLocationPrompt(true)}
-                >
-                  Edit route info
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Edit Items */}
-          <div>
-            <h3 className="font-semibold mb-3">Edit Cargo Items</h3>
-            <EditableCargoTable
-              items={currentItems}
-              onItemsChange={handleItemsChange}
-            />
+        {/* Column 4: Axle Weights */}
+        <div>
+          <h4 className="font-semibold mb-3">Axle Weights (Net)</h4>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-muted-foreground">Front:</span> {frontAxle.toLocaleString()} LB</p>
+            <p><span className="text-muted-foreground">Rear:</span> {rearAxle.toLocaleString()} LB</p>
           </div>
         </div>
       </div>
+
+      {/* Items Table */}
+      <div className="bg-white rounded-lg border overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b bg-slate-50">
+              <th className="px-4 py-3 text-left w-8"></th>
+              <th className="px-4 py-3 text-left">SKU</th>
+              <th className="px-4 py-3 text-left">Name</th>
+              <th className="px-4 py-3 text-center">Quantity</th>
+              <th className="px-4 py-3 text-right">Length</th>
+              <th className="px-4 py-3 text-right">Width</th>
+              <th className="px-4 py-3 text-right">Height</th>
+              <th className="px-4 py-3 text-right">Weight/pc.</th>
+              <th className="px-4 py-3 text-center">Not Stackable</th>
+            </tr>
+          </thead>
+          <tbody>
+            {load.items.map((item, idx) => (
+              <tr key={item.id} className="border-b last:border-b-0">
+                <td className="px-4 py-3">
+                  <div
+                    className="w-4 h-4 rounded"
+                    style={{ backgroundColor: ITEM_COLORS[idx % ITEM_COLORS.length] }}
+                  />
+                </td>
+                <td className="px-4 py-3">{item.sku || idx + 1}</td>
+                <td className="px-4 py-3">{item.description || `Item ${idx + 1}`}</td>
+                <td className="px-4 py-3 text-center">{item.quantity}</td>
+                <td className="px-4 py-3 text-right">{(item.length * 12).toFixed(0)}</td>
+                <td className="px-4 py-3 text-right">{(item.width * 12).toFixed(0)}</td>
+                <td className="px-4 py-3 text-right">{(item.height * 12).toFixed(0)}</td>
+                <td className="px-4 py-3 text-right">{item.weight.toLocaleString()}</td>
+                <td className="px-4 py-3 text-center">{!item.stackable ? '✓' : ''}</td>
+              </tr>
+            ))}
+            {/* Totals row */}
+            <tr className="bg-slate-50 font-medium">
+              <td className="px-4 py-3"></td>
+              <td className="px-4 py-3"></td>
+              <td className="px-4 py-3">TOTAL</td>
+              <td className="px-4 py-3 text-center">{load.items.reduce((sum, i) => sum + i.quantity, 0)}</td>
+              <td className="px-4 py-3"></td>
+              <td className="px-4 py-3"></td>
+              <td className="px-4 py-3"></td>
+              <td className="px-4 py-3 text-right">{load.items.reduce((sum, i) => sum + i.weight, 0).toLocaleString()}</td>
+              <td className="px-4 py-3"></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// Isometric Trailer View Component
+function IsometricTrailerView({ load }: { load: PlannedLoad }) {
+  const maxItemLength = Math.max(...load.items.map(i => i.length), 1)
+
+  return (
+    <div className="relative h-48 flex items-center justify-center">
+      {/* SVG Isometric View */}
+      <svg viewBox="0 0 400 200" className="w-full max-w-lg h-full">
+        {/* Gooseneck */}
+        <polygon points="30,120 60,120 60,140 30,140" fill="#9CA3AF" />
+        <circle cx="35" cy="140" r="6" fill="#374151" />
+
+        {/* Trailer deck */}
+        <rect x="55" y="115" width="280" height="30" fill="#D1D5DB" stroke="#9CA3AF" strokeWidth="1" />
+
+        {/* Wheels */}
+        <circle cx="300" cy="155" r="10" fill="#374151" />
+        <circle cx="320" cy="155" r="10" fill="#374151" />
+        <circle cx="340" cy="155" r="10" fill="#374151" />
+
+        {/* Cargo items - isometric boxes */}
+        {load.items.slice(0, 6).map((item, idx) => {
+          const color = ITEM_COLORS[idx % ITEM_COLORS.length]
+          const xOffset = 65 + idx * 40
+          const boxWidth = Math.min((item.length / maxItemLength) * 60, 50)
+          const boxHeight = Math.min(item.height * 6, 70)
+
+          return (
+            <g key={item.id}>
+              {/* Front face */}
+              <rect
+                x={xOffset}
+                y={115 - boxHeight}
+                width={boxWidth}
+                height={boxHeight}
+                fill={color}
+                stroke={color}
+                strokeWidth="1"
+              />
+              {/* Top face (lighter) */}
+              <polygon
+                points={`${xOffset},${115 - boxHeight} ${xOffset + 10},${105 - boxHeight} ${xOffset + boxWidth + 10},${105 - boxHeight} ${xOffset + boxWidth},${115 - boxHeight}`}
+                fill={color}
+                opacity="0.7"
+              />
+              {/* Right face (darker) */}
+              <polygon
+                points={`${xOffset + boxWidth},${115 - boxHeight} ${xOffset + boxWidth + 10},${105 - boxHeight} ${xOffset + boxWidth + 10},${105} ${xOffset + boxWidth},${115}`}
+                fill={color}
+                opacity="0.5"
+              />
+              {/* Label */}
+              <text
+                x={xOffset + boxWidth / 2}
+                y={115 - boxHeight / 2}
+                textAnchor="middle"
+                fill="white"
+                fontSize="8"
+                fontWeight="bold"
+              >
+                {idx + 1}
+              </text>
+              <text
+                x={xOffset + boxWidth / 2}
+                y={115 - boxHeight / 2 + 10}
+                textAnchor="middle"
+                fill="white"
+                fontSize="6"
+              >
+                {(item.length * 12).toFixed(0)}x{(item.width * 12).toFixed(0)}x{(item.height * 12).toFixed(0)}
+              </text>
+            </g>
+          )
+        })}
+
+        {load.items.length > 6 && (
+          <text x="350" y="100" fontSize="12" fill="#6B7280">...</text>
+        )}
+      </svg>
+    </div>
+  )
+}
+
+// Top View Component
+function TopView({ load }: { load: PlannedLoad }) {
+  return (
+    <div className="relative h-20 bg-slate-200 rounded">
+      <div className="absolute inset-2 flex gap-1">
+        {load.items.slice(0, 5).map((item, idx) => {
+          const color = ITEM_COLORS[idx % ITEM_COLORS.length]
+          const widthRatio = Math.min(item.length / load.recommendedTruck.deckLength, 0.3)
+          return (
+            <div
+              key={item.id}
+              className="h-full rounded-sm flex items-center justify-center"
+              style={{
+                backgroundColor: color,
+                width: `${widthRatio * 100}%`,
+                minWidth: '15px',
+              }}
+            >
+              <span className="text-white text-xs font-medium">{idx + 1}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// Side View Component
+function SideView({ load }: { load: PlannedLoad }) {
+  return (
+    <div className="relative h-20">
+      {/* Deck */}
+      <div className="absolute bottom-2 left-0 right-8 h-2 bg-slate-400 rounded-sm" />
+
+      {/* Wheels */}
+      <div className="absolute bottom-0 right-2 flex gap-1">
+        <div className="w-3 h-3 bg-slate-600 rounded-full" />
+        <div className="w-3 h-3 bg-slate-600 rounded-full" />
+      </div>
+
+      {/* Gooseneck */}
+      <div className="absolute bottom-2 -left-1 w-4 h-2 bg-slate-300 rounded-sm" />
+
+      {/* Cargo */}
+      <div className="absolute bottom-4 left-2 right-10 flex gap-1 items-end h-12">
+        {load.items.slice(0, 5).map((item, idx) => {
+          const color = ITEM_COLORS[idx % ITEM_COLORS.length]
+          const heightRatio = Math.min(item.height / 12, 1)
+          return (
+            <div
+              key={item.id}
+              className="flex-1 rounded-sm flex items-center justify-center"
+              style={{
+                backgroundColor: color,
+                height: `${heightRatio * 100}%`,
+                minWidth: '12px',
+              }}
+            >
+              <span className="text-white text-xs">{idx + 1}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// Front View Component
+function FrontView({ load }: { load: PlannedLoad }) {
+  // Show the widest item
+  const widestItem = load.items.reduce((max, item) => item.width > max.width ? item : max, load.items[0])
+  const idx = load.items.indexOf(widestItem)
+  const color = ITEM_COLORS[idx % ITEM_COLORS.length]
+
+  return (
+    <div className="relative h-20">
+      {/* Deck */}
+      <div className="absolute bottom-2 left-2 right-2 h-2 bg-slate-400 rounded-sm" />
+
+      {/* Wheels */}
+      <div className="absolute bottom-0 left-3">
+        <div className="w-3 h-3 bg-slate-600 rounded-full" />
+      </div>
+      <div className="absolute bottom-0 right-3">
+        <div className="w-3 h-3 bg-slate-600 rounded-full" />
+      </div>
+
+      {/* Cargo - widest item */}
+      {widestItem && (
+        <div
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-sm flex items-center justify-center"
+          style={{
+            backgroundColor: color,
+            width: `${Math.min(widestItem.width / load.recommendedTruck.deckWidth, 1) * 70}%`,
+            height: `${Math.min(widestItem.height / 12, 1) * 50}px`,
+            minWidth: '30px',
+          }}
+        >
+          <span className="text-white text-xs font-medium">{idx + 1}</span>
+        </div>
+      )}
     </div>
   )
 }
