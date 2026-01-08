@@ -10,26 +10,70 @@ import { PDFParse } from 'pdf-parse'
 function toLoadItem(item: ParsedItem): LoadItem {
   return {
     id: item.id,
+    sku: item.sku,
     description: item.description,
     quantity: item.quantity,
     length: item.length,
     width: item.width,
     height: item.height,
     weight: item.weight,
-    stackable: false,
+    // Stacking properties
+    stackable: item.stackable ?? false,
+    bottomOnly: item.bottomOnly,
+    maxLayers: item.maxLayers,
+    maxLoad: item.maxLoad,
+    // Orientation/rotation
+    orientation: item.orientation,
+    // Visual properties
+    geometry: item.geometry,
+    color: item.color,
+    // Loading order
+    priority: item.priority,
+    // Other
     fragile: false,
     hazmat: false,
   }
 }
 
+// Calculate smart confidence score based on data quality
+function calculateConfidence(items: LoadItem[], parseMethod: string): number {
+  if (items.length === 0) return 0
+
+  let score = 0
+  const item = items[0] // Check first item for field presence
+
+  // Core fields (65 points max)
+  if (item.length > 0) score += 15
+  if (item.width > 0) score += 15
+  if (item.height > 0) score += 10
+  if (item.weight > 0) score += 25
+
+  // Description (10 points)
+  if (item.description && item.description.length > 3) score += 10
+
+  // Multiple items bonus (10 points)
+  if (items.length > 1) score += 10
+
+  // AI parsing bonus (15 points) - AI is generally more reliable
+  if (parseMethod === 'AI') score += 15
+
+  return Math.min(score, 100)
+}
+
 // Convert UniversalParseResult to ParsedLoad
-function toParsedLoad(result: UniversalParseResult): ParsedLoad {
+function toParsedLoad(result: UniversalParseResult, parseMethod: string = 'pattern'): ParsedLoad {
   const items = result.items.map(toLoadItem)
 
   // Calculate overall dimensions from all items
+  // Length: max (items placed end-to-end or side-by-side)
   const length = items.length > 0 ? Math.max(...items.map(i => i.length)) : 0
+  // Width: max (widest item determines load width)
   const width = items.length > 0 ? Math.max(...items.map(i => i.width)) : 0
-  const height = items.length > 0 ? Math.max(...items.map(i => i.height)) : 0
+  // Height: SUM all heights (conservative - assumes stacked cargo for permits)
+  const height = items.length > 0
+    ? items.reduce((sum, i) => sum + i.height * i.quantity, 0)
+    : 0
+  // Weight: sum all weights with quantities
   const weight = items.reduce((sum, i) => sum + i.weight * i.quantity, 0)
 
   return {
@@ -39,7 +83,7 @@ function toParsedLoad(result: UniversalParseResult): ParsedLoad {
     weight,
     items,
     description: items.map(i => i.description).join(', ').slice(0, 100),
-    confidence: result.success ? 85 : 50,
+    confidence: calculateConfidence(items, parseMethod),
   }
 }
 
@@ -104,6 +148,7 @@ export async function POST(request: NextRequest) {
             fileName: file.name,
             fileType: 'Image',
             parsedRows: aiResult.items.length,
+            parseMethod: 'AI', // Images are always AI-parsed
           },
           rawText: aiResult.rawResponse,
           error: aiResult.error,
@@ -134,8 +179,32 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
+    // Track parse method for confidence scoring
+    // Use metadata parseMethod if already set (e.g., for images which are always AI-parsed)
+    let parseMethod = parseResult.metadata?.parseMethod || 'pattern'
+
+    // AI Fallback: If pattern matching found no items but we have raw text, try AI
+    if (parseResult.items.length === 0 && parseResult.rawText && parseResult.rawText.trim().length > 20) {
+      console.log('Pattern matching found no items, trying AI fallback...')
+      const aiResult = await parseTextWithAI(parseResult.rawText)
+
+      if (aiResult.success && aiResult.items.length > 0) {
+        parseResult = {
+          success: true,
+          items: aiResult.items,
+          metadata: {
+            ...parseResult.metadata,
+            parseMethod: 'AI',
+          },
+          rawText: parseResult.rawText,
+        }
+        parseMethod = 'AI'
+        console.log(`AI fallback found ${aiResult.items.length} items`)
+      }
+    }
+
     // Convert to ParsedLoad format
-    const parsedLoad = toParsedLoad(parseResult)
+    const parsedLoad = toParsedLoad(parseResult, parseMethod)
 
     // Get truck recommendations
     let recommendations: TruckRecommendation[] = []
@@ -143,13 +212,30 @@ export async function POST(request: NextRequest) {
       recommendations = selectTrucks(parsedLoad)
     }
 
+    // Build enhanced metadata with parsing details
+    const enhancedMetadata = {
+      ...parseResult.metadata,
+      parseMethod,
+      itemsFound: parseResult.items.length,
+      hasAIFallback: parseMethod === 'AI' && parseResult.metadata?.parseMethod !== 'AI',
+    }
+
+    // Generate helpful error/warning messages
+    let warning: string | undefined
+    if (parseResult.items.length === 0) {
+      warning = 'No cargo items could be extracted. Please check your file format or try pasting the text directly.'
+    } else if (parsedLoad.confidence < 50) {
+      warning = 'Low confidence parsing. Some dimensions or weights may be missing. Please review the extracted data.'
+    }
+
     return NextResponse.json({
-      success: parseResult.success,
+      success: parseResult.success && parseResult.items.length > 0,
       parsedLoad,
       recommendations,
-      metadata: parseResult.metadata,
+      metadata: enhancedMetadata,
       rawText: parseResult.rawText,
       error: parseResult.error,
+      warning,
     })
   } catch (error) {
     console.error('Analyze file error:', error)

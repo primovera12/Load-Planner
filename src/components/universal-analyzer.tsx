@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react'
+import { FilePreview } from '@/components/analyze/file-preview'
 
 const ACCEPTED_TYPES = {
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel',
@@ -300,7 +301,7 @@ export function UniversalAnalyzer() {
                 </div>
               </div>
             ) : (
-              <div className="p-6">
+              <div className="p-6 space-y-4">
                 <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg">
                   {getFileIcon(file.type)}
                   <div className="flex-1 min-w-0">
@@ -320,6 +321,12 @@ export function UniversalAnalyzer() {
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
+                {/* File Preview for spreadsheets */}
+                {(file.name.toLowerCase().endsWith('.xlsx') ||
+                  file.name.toLowerCase().endsWith('.xls') ||
+                  file.name.toLowerCase().endsWith('.csv')) && (
+                  <FilePreview file={file} maxRows={5} />
+                )}
               </div>
             )}
           </CardContent>
@@ -390,6 +397,14 @@ To: Dallas, TX"
         </div>
       )}
 
+      {/* Warning Message */}
+      {result?.warning && !error && (
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-700">
+          <AlertCircle className="h-5 w-5 flex-shrink-0" />
+          <p>{result.warning}</p>
+        </div>
+      )}
+
       {/* Results Section */}
       {result && result.parsedLoad && (
         <div className="space-y-6">
@@ -400,8 +415,25 @@ To: Dallas, TX"
               <p className="font-medium">Analysis Complete!</p>
               <p className="text-sm text-green-600">
                 Found {result.parsedLoad.items.length || 1} cargo item(s) with {result.recommendations?.length || 0} truck recommendations
+                {result.metadata?.parseMethod === 'AI' && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                    <Sparkles className="h-3 w-3 mr-1" />
+                    AI Parsed
+                  </span>
+                )}
               </p>
             </div>
+            {result.parsedLoad.confidence > 0 && (
+              <div className="text-right">
+                <div className="text-xs text-green-600">Confidence</div>
+                <div className={`text-lg font-bold ${
+                  result.parsedLoad.confidence >= 75 ? 'text-green-700' :
+                  result.parsedLoad.confidence >= 50 ? 'text-yellow-600' : 'text-red-600'
+                }`}>
+                  {result.parsedLoad.confidence}%
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Action Buttons */}

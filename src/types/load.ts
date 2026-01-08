@@ -1,7 +1,15 @@
 // Load and cargo type definitions
 
+// Geometry types for 3D visualization
+export type ItemGeometry = 'box' | 'cylinder' | 'hollow-cylinder'
+
+// Orientation flags (bitmask like Cargo Planner)
+// 1 = Fixed (longship), 3 = Rotatable (default), 63 = Tiltable
+export type OrientationMode = 1 | 3 | 63 | number
+
 export interface LoadItem {
   id: string
+  sku?: string // Item identifier/SKU
   description: string
   quantity: number
   // Dimensions in feet
@@ -10,8 +18,21 @@ export interface LoadItem {
   height: number
   // Weight in pounds
   weight: number
-  // Optional properties
+  // Stacking properties
   stackable?: boolean
+  bottomOnly?: boolean // Can only be placed at bottom, nothing stacked on top
+  maxLayers?: number // Max items that can stack on this
+  maxLoad?: number // Max weight that can be placed on top (lbs)
+  // Orientation/rotation
+  orientation?: OrientationMode // 1=fixed, 3=rotatable, 63=tiltable
+  // Visual properties
+  geometry?: ItemGeometry // box, cylinder, hollow-cylinder
+  color?: string // Hex color for visualization
+  // Loading order
+  priority?: number // Higher = load first
+  loadIn?: string // Target container/trailer
+  destination?: string // For multi-stop routes
+  // Other properties
   fragile?: boolean
   hazmat?: boolean
   notes?: string
@@ -94,9 +115,21 @@ export interface AnalyzeRequest {
   emailText: string
 }
 
+export interface AnalyzeMetadata {
+  fileName?: string
+  fileType?: string
+  parsedRows?: number
+  parseMethod?: 'pattern' | 'AI'
+  itemsFound?: number
+  hasAIFallback?: boolean
+}
+
 export interface AnalyzeResponse {
   success: boolean
   parsedLoad: ParsedLoad
   recommendations: import('./truck').TruckRecommendation[]
+  metadata?: AnalyzeMetadata
+  rawText?: string
   error?: string
+  warning?: string
 }

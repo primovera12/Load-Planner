@@ -2,12 +2,26 @@ import * as XLSX from 'xlsx'
 
 export interface ParsedItem {
   id: string
+  sku?: string // Item identifier
   description: string
   quantity: number
   length: number // feet
   width: number // feet
   height: number // feet
   weight: number // lbs
+  // Stacking properties
+  stackable?: boolean
+  bottomOnly?: boolean
+  maxLayers?: number
+  maxLoad?: number
+  // Orientation/rotation (1=fixed, 3=rotatable, 63=tiltable)
+  orientation?: number
+  // Visual properties
+  geometry?: 'box' | 'cylinder' | 'hollow-cylinder'
+  color?: string
+  // Loading order
+  priority?: number
+  // Original data
   unit?: string // original unit for reference
   raw?: Record<string, unknown> // original row data
 }
@@ -21,30 +35,41 @@ export interface UniversalParseResult {
     sheetName?: string
     totalRows?: number
     parsedRows?: number
+    parseMethod?: 'pattern' | 'AI'
   }
   error?: string
   rawText?: string // For AI processing
 }
 
-// Common column name patterns
+// Common column name patterns - expanded for international formats
 const COLUMN_PATTERNS = {
-  description: /desc|name|item|part|product|material|cargo|equipment/i,
-  quantity: /qty|quantity|count|pcs|pieces|units?$/i,
-  length: /length|len|l\s*[\(\[]|^l$/i,
-  width: /width|wid|w\s*[\(\[]|^w$/i,
-  height: /height|hgt|h\s*[\(\[]|^h$/i,
-  weight: /weight|wt|wgt|mass|gw|gross|lbs|kg|pounds|kilos/i,
-  // Metric-specific
-  lengthMeters: /l\s*\(?m\)?|length.*meter|meters?$/i,
-  widthMeters: /w\s*\(?m\)?|width.*meter/i,
-  heightMeters: /h\s*\(?m\)?|height.*meter/i,
-  weightKg: /kg|kilo|gross.*kg|gw.*kg/i,
-  weightLbs: /lbs|pounds|gross.*lb/i,
+  // Description/item name
+  description: /desc|name|item|part|product|material|cargo|equipment|bezeichnung|artikel/i,
+  // Quantity
+  quantity: /qty|quantity|count|pcs|pieces|units?$|menge|stück|anzahl/i,
+  // Length - including European abbreviations (Lng, Laenge, Länge)
+  length: /length|len|lng|laenge|länge|l\s*[\(\[]|^l$|^l\s/i,
+  // Width - including European abbreviations (Wid, Breite)
+  width: /width|wid|breite|w\s*[\(\[]|^w$|^w\s/i,
+  // Height - including European abbreviations (Hgt, Höhe, Hoehe)
+  height: /height|hgt|höhe|hoehe|h\s*[\(\[]|^h$|^h\s/i,
+  // Weight - multiple formats
+  weight: /weight|wt|wgt|mass|gw|gross|lbs|kg|pounds|kilos|gewicht/i,
+  // Metric-specific with unit detection
+  lengthMeters: /l\s*\(?m\)?|length.*meter|lng.*\(m\)|meters?$/i,
+  widthMeters: /w\s*\(?m\)?|width.*meter|wid.*\(m\)/i,
+  heightMeters: /h\s*\(?m\)?|height.*meter|hgt.*\(m\)/i,
+  // Weight units
+  weightKg: /kg|kilo|gross.*kg|gw.*kg|gewicht.*kg/i,
+  weightLbs: /lbs|pounds|gross.*lb|lb$/i,
+  weightTons: /tons?$|tonnes?|ton\b/i,
 }
 
 // Unit conversion helpers
 const metersToFeet = (m: number) => m * 3.28084
+const decimetersToFeet = (dm: number) => dm * 0.328084 // Cargo Planner uses decimeters
 const kgToLbs = (kg: number) => kg * 2.20462
+const tonsToLbs = (tons: number) => tons * 2000 // US short tons
 const inchesToFeet = (inches: number) => inches / 12
 const cmToFeet = (cm: number) => cm / 30.48
 const mmToFeet = (mm: number) => mm / 304.8
@@ -122,72 +147,213 @@ function parseNumber(value: unknown): number | null {
 
 /**
  * Auto-detect columns from headers
+ * Supports standard formats and Cargo Planner format (decimeters, orientation, etc.)
  */
 function autoDetectColumns(headers: string[]): Record<string, number> {
   const mapping: Record<string, number> = {}
   const usedIndices = new Set<number>()
 
-  // First pass: look for exact/strong matches
+  // First pass: look for exact/strong matches with units
   headers.forEach((header, index) => {
     const h = header.toLowerCase().trim()
 
-    // Length (meters)
-    if (!mapping.lengthMeters && h.match(/l\s*\(?meters?\)?|length.*\(m\)|^l \(meters\)/i)) {
+    // === CARGO PLANNER SPECIFIC ===
+    // SKU / Item ID
+    if (!mapping.sku && h.match(/^sku$|^item.?id$|^part.?no$|^article/i)) {
+      mapping.sku = index
+      usedIndices.add(index)
+    }
+    // Stackable (Yes/No)
+    if (!mapping.stackable && h.match(/^stackable$/i)) {
+      mapping.stackable = index
+      usedIndices.add(index)
+    }
+    // Bottom Only (Yes/No)
+    if (!mapping.bottomOnly && h.match(/bottom.?only/i)) {
+      mapping.bottomOnly = index
+      usedIndices.add(index)
+    }
+    // Orientation (1-63)
+    if (!mapping.orientation && h.match(/^orientation/i)) {
+      mapping.orientation = index
+      usedIndices.add(index)
+    }
+    // Max layers
+    if (!mapping.maxLayers && h.match(/max.?layers/i)) {
+      mapping.maxLayers = index
+      usedIndices.add(index)
+    }
+    // Max load
+    if (!mapping.maxLoad && h.match(/max.?load/i)) {
+      mapping.maxLoad = index
+      usedIndices.add(index)
+    }
+    // Geometry (Box/Cylinder)
+    if (!mapping.geometry && h.match(/^geometry/i)) {
+      mapping.geometry = index
+      usedIndices.add(index)
+    }
+    // Color
+    if (!mapping.color && h.match(/^color$|^colour$/i)) {
+      mapping.color = index
+      usedIndices.add(index)
+    }
+    // Priority
+    if (!mapping.priority && h.match(/^priority/i)) {
+      mapping.priority = index
+      usedIndices.add(index)
+    }
+
+    // === DIMENSION UNITS ===
+    // Length with units (decimeters - Cargo Planner default)
+    if (!mapping.lengthDecimeters && h.match(/^length$|^l$/i)) {
+      // Check if previous header row indicates decimeters
+      mapping.lengthDecimeters = index // Will verify with header metadata
+      usedIndices.add(index)
+    }
+    // Length with units (meters)
+    if (!mapping.lengthMeters && h.match(/l\s*\(?meters?\)?|length.*\(m\)|lng.*\(m\)|^l \(meters\)/i)) {
       mapping.lengthMeters = index
       usedIndices.add(index)
     }
-    // Width (meters)
-    if (!mapping.widthMeters && h.match(/w\s*\(?meters?\)?|width.*\(m\)/i)) {
+    // Width with units (meters)
+    if (!mapping.widthMeters && h.match(/w\s*\(?meters?\)?|width.*\(m\)|wid.*\(m\)/i)) {
       mapping.widthMeters = index
       usedIndices.add(index)
     }
-    // Height (meters)
-    if (!mapping.heightMeters && h.match(/h\s*\(?meters?\)?|height.*\(m\)/i)) {
+    // Height with units (meters)
+    if (!mapping.heightMeters && h.match(/h\s*\(?meters?\)?|height.*\(m\)|hgt.*\(m\)/i)) {
       mapping.heightMeters = index
       usedIndices.add(index)
     }
-    // Length (inches)
-    if (!mapping.lengthInches && h.match(/l\s*\(?inch/i)) {
+    // Length with units (inches)
+    if (!mapping.lengthInches && h.match(/l\s*\(?inch|length.*\(in\)|lng.*inch/i)) {
       mapping.lengthInches = index
       usedIndices.add(index)
     }
-    // Width (inches)
-    if (!mapping.widthInches && h.match(/w\s*\(?inch/i)) {
+    // Width with units (inches)
+    if (!mapping.widthInches && h.match(/w\s*\(?inch|width.*\(in\)|wid.*inch/i)) {
       mapping.widthInches = index
       usedIndices.add(index)
     }
-    // Height (inches)
-    if (!mapping.heightInches && h.match(/h\s*\(?inch/i)) {
+    // Height with units (inches)
+    if (!mapping.heightInches && h.match(/h\s*\(?inch|height.*\(in\)|hgt.*inch/i)) {
       mapping.heightInches = index
       usedIndices.add(index)
     }
+    // Length with units (feet)
+    if (!mapping.lengthFeet && h.match(/l\s*\(?ft\)?|length.*\(ft\)|lng.*feet|length.*feet/i)) {
+      mapping.lengthFeet = index
+      usedIndices.add(index)
+    }
+    // Width with units (feet)
+    if (!mapping.widthFeet && h.match(/w\s*\(?ft\)?|width.*\(ft\)|wid.*feet|width.*feet/i)) {
+      mapping.widthFeet = index
+      usedIndices.add(index)
+    }
+    // Height with units (feet)
+    if (!mapping.heightFeet && h.match(/h\s*\(?ft\)?|height.*\(ft\)|hgt.*feet|height.*feet/i)) {
+      mapping.heightFeet = index
+      usedIndices.add(index)
+    }
     // Weight (lbs)
-    if (!mapping.weightLbs && h.match(/lbs|pounds/i)) {
+    if (!mapping.weightLbs && h.match(/lbs|pounds|\(lb\)/i)) {
       mapping.weightLbs = index
       usedIndices.add(index)
     }
     // Weight (kg)
-    if (!mapping.weightKg && h.match(/gw\s*\(?kg\)?|weight.*kg|kg/i) && !h.match(/lbs/i)) {
+    if (!mapping.weightKg && h.match(/gw\s*\(?kg\)?|weight.*kg|\(kg\)|kg$/i) && !h.match(/lbs/i)) {
       mapping.weightKg = index
       usedIndices.add(index)
     }
-    // Description
-    if (!mapping.description && h.match(/description|item|name|part|product|material|cargo/i)) {
+    // Weight (tons)
+    if (!mapping.weightTons && h.match(/tons?$|tonnes?|\(t\)|ton\b/i) && !h.match(/lbs|kg/i)) {
+      mapping.weightTons = index
+      usedIndices.add(index)
+    }
+    // Description / Name
+    if (!mapping.description && h.match(/^name$|description|item|part|product|material|cargo|bezeichnung|artikel/i) && !h.match(/^sku$/i)) {
       mapping.description = index
       usedIndices.add(index)
     }
     // Quantity
-    if (!mapping.quantity && h.match(/qty|quantity|count|pcs/i)) {
+    if (!mapping.quantity && h.match(/qty|quantity|count|pcs|menge|stück|anzahl/i)) {
       mapping.quantity = index
       usedIndices.add(index)
     }
   })
 
+  // Second pass: generic L/W/H fallback if no unit-specific columns found
+  if (!mapping.lengthMeters && !mapping.lengthInches && !mapping.lengthFeet) {
+    headers.forEach((header, index) => {
+      if (usedIndices.has(index)) return
+      const h = header.toLowerCase().trim()
+      if (h.match(/^length$|^len$|^lng$|^l$/i)) {
+        mapping.lengthFeet = index // Assume feet as default
+        usedIndices.add(index)
+      }
+    })
+  }
+  if (!mapping.widthMeters && !mapping.widthInches && !mapping.widthFeet) {
+    headers.forEach((header, index) => {
+      if (usedIndices.has(index)) return
+      const h = header.toLowerCase().trim()
+      if (h.match(/^width$|^wid$|^w$/i)) {
+        mapping.widthFeet = index
+        usedIndices.add(index)
+      }
+    })
+  }
+  if (!mapping.heightMeters && !mapping.heightInches && !mapping.heightFeet) {
+    headers.forEach((header, index) => {
+      if (usedIndices.has(index)) return
+      const h = header.toLowerCase().trim()
+      if (h.match(/^height$|^hgt$|^h$/i)) {
+        mapping.heightFeet = index
+        usedIndices.add(index)
+      }
+    })
+  }
+  if (!mapping.weightLbs && !mapping.weightKg && !mapping.weightTons) {
+    headers.forEach((header, index) => {
+      if (usedIndices.has(index)) return
+      const h = header.toLowerCase().trim()
+      if (h.match(/^weight$|^wt$|^wgt$|^mass$|^gw$/i)) {
+        mapping.weightLbs = index // Assume lbs as default
+        usedIndices.add(index)
+      }
+    })
+  }
+
   return mapping
 }
 
 /**
+ * Parse Yes/No values to boolean
+ */
+function parseYesNo(value: unknown): boolean | undefined {
+  if (value === null || value === undefined || value === '') return undefined
+  const str = String(value).toLowerCase().trim()
+  if (str === 'yes' || str === 'y' || str === '1' || str === 'true') return true
+  if (str === 'no' || str === 'n' || str === '0' || str === 'false') return false
+  return undefined
+}
+
+/**
+ * Parse geometry type from string
+ */
+function parseGeometry(value: unknown): 'box' | 'cylinder' | 'hollow-cylinder' | undefined {
+  if (!value) return undefined
+  const str = String(value).toLowerCase().trim()
+  if (str.includes('cylinder') && str.includes('hollow')) return 'hollow-cylinder'
+  if (str.includes('cylinder')) return 'cylinder'
+  if (str.includes('box')) return 'box'
+  return undefined
+}
+
+/**
  * Parse Excel/CSV data
+ * Supports standard formats and Cargo Planner format (decimeters/kilograms)
  */
 export function parseSpreadsheet(data: ArrayBuffer, fileName: string): UniversalParseResult {
   try {
@@ -195,6 +361,7 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
     const items: ParsedItem[] = []
     let totalRows = 0
     let parsedRows = 0
+    let rawTextParts: string[] = [] // Collect raw text for AI fallback
 
     // Process each sheet
     for (const sheetName of workbook.SheetNames) {
@@ -203,11 +370,32 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
 
       if (jsonData.length < 2) continue // Need at least header + 1 row
 
+      // Detect Cargo Planner format by looking for "Decimeters" or "Kilograms" in first rows
+      let isCargoPlanner = false
+      let usesDecimeters = false
+      let usesKilograms = false
+      for (let i = 0; i < Math.min(5, jsonData.length); i++) {
+        const rowStr = (jsonData[i] as unknown[]).join(' ').toLowerCase()
+        if (rowStr.includes('decimeter')) {
+          isCargoPlanner = true
+          usesDecimeters = true
+        }
+        if (rowStr.includes('kilogram')) {
+          isCargoPlanner = true
+          usesKilograms = true
+        }
+      }
+
       // Find the header row (usually first non-empty row with dimension-related words)
       let headerRowIndex = 0
       for (let i = 0; i < Math.min(10, jsonData.length); i++) {
         const row = jsonData[i] as unknown[]
         const rowStr = row.join(' ').toLowerCase()
+        // Cargo Planner: look for SKU, Name, Length pattern
+        if (rowStr.match(/^sku.*name.*length/i) || rowStr.match(/length.*width.*height.*weight/i)) {
+          headerRowIndex = i
+          break
+        }
         if (rowStr.match(/length|width|height|weight|description|dimension/i)) {
           headerRowIndex = i
           break
@@ -217,12 +405,25 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
       const headers = (jsonData[headerRowIndex] as unknown[]).map(h => String(h || ''))
       const columnMap = autoDetectColumns(headers)
 
+      // Collect raw text from sheet for AI fallback
+      rawTextParts.push(`Sheet: ${sheetName}`)
+      rawTextParts.push(headers.join(' | '))
+
       // Process data rows
       for (let i = headerRowIndex + 1; i < jsonData.length; i++) {
         const row = jsonData[i] as unknown[]
         if (!row || row.every(cell => cell === '' || cell === null)) continue
 
+        // Add row to raw text
+        rawTextParts.push((row as unknown[]).map(cell => String(cell || '')).join(' | '))
+
         totalRows++
+
+        // Get SKU
+        let sku: string | undefined
+        if (columnMap.sku !== undefined) {
+          sku = String(row[columnMap.sku] || '') || undefined
+        }
 
         // Get description
         let description = ''
@@ -231,7 +432,7 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
         }
 
         // Skip if no description and no dimension data
-        if (!description && !row.some(cell => parseNumber(cell) !== null)) continue
+        if (!description && !sku && !row.some(cell => parseNumber(cell) !== null)) continue
 
         // Get quantity
         let quantity = 1
@@ -239,31 +440,54 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
           quantity = parseNumber(row[columnMap.quantity]) || 1
         }
 
-        // Get dimensions - prefer LBS/feet if available, otherwise convert from metric
+        // Get dimensions - prefer feet, then inches, then meters, then decimeters (Cargo Planner)
         let length = 0, width = 0, height = 0, weight = 0
 
-        // Try LBS first
+        // Weight: prefer lbs, then convert from kg or tons
         if (columnMap.weightLbs !== undefined) {
           weight = parseNumber(row[columnMap.weightLbs]) || 0
-        } else if (columnMap.weightKg !== undefined) {
-          const kg = parseNumber(row[columnMap.weightKg]) || 0
-          weight = kgToLbs(kg)
+        } else if (columnMap.weightKg !== undefined || usesKilograms) {
+          // If Cargo Planner format with kilograms
+          const kgCol = columnMap.weightKg ?? headers.findIndex(h => h.toLowerCase().includes('weight'))
+          if (kgCol >= 0) {
+            const kg = parseNumber(row[kgCol]) || 0
+            weight = kgToLbs(kg)
+          }
+        } else if (columnMap.weightTons !== undefined) {
+          const tons = parseNumber(row[columnMap.weightTons]) || 0
+          weight = tonsToLbs(tons)
         }
 
-        // Try inches first for dimensions
-        if (columnMap.lengthInches !== undefined) {
+        // Length: check for Cargo Planner decimeters first
+        if (usesDecimeters && columnMap.lengthDecimeters !== undefined) {
+          length = decimetersToFeet(parseNumber(row[columnMap.lengthDecimeters]) || 0)
+        } else if (columnMap.lengthFeet !== undefined) {
+          length = parseNumber(row[columnMap.lengthFeet]) || 0
+        } else if (columnMap.lengthInches !== undefined) {
           length = inchesToFeet(parseNumber(row[columnMap.lengthInches]) || 0)
         } else if (columnMap.lengthMeters !== undefined) {
           length = metersToFeet(parseNumber(row[columnMap.lengthMeters]) || 0)
         }
 
-        if (columnMap.widthInches !== undefined) {
+        // Width: check for Cargo Planner decimeters
+        const widthColIndex = headers.findIndex(h => h.toLowerCase().match(/^width\s*$/i))
+        if (usesDecimeters && widthColIndex >= 0) {
+          width = decimetersToFeet(parseNumber(row[widthColIndex]) || 0)
+        } else if (columnMap.widthFeet !== undefined) {
+          width = parseNumber(row[columnMap.widthFeet]) || 0
+        } else if (columnMap.widthInches !== undefined) {
           width = inchesToFeet(parseNumber(row[columnMap.widthInches]) || 0)
         } else if (columnMap.widthMeters !== undefined) {
           width = metersToFeet(parseNumber(row[columnMap.widthMeters]) || 0)
         }
 
-        if (columnMap.heightInches !== undefined) {
+        // Height: check for Cargo Planner decimeters
+        const heightColIndex = headers.findIndex(h => h.toLowerCase().match(/^height\s*$/i))
+        if (usesDecimeters && heightColIndex >= 0) {
+          height = decimetersToFeet(parseNumber(row[heightColIndex]) || 0)
+        } else if (columnMap.heightFeet !== undefined) {
+          height = parseNumber(row[columnMap.heightFeet]) || 0
+        } else if (columnMap.heightInches !== undefined) {
           height = inchesToFeet(parseNumber(row[columnMap.heightInches]) || 0)
         } else if (columnMap.heightMeters !== undefined) {
           height = metersToFeet(parseNumber(row[columnMap.heightMeters]) || 0)
@@ -274,14 +498,49 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
 
         parsedRows++
 
+        // Extract Cargo Planner specific fields
+        const stackable = columnMap.stackable !== undefined
+          ? parseYesNo(row[columnMap.stackable])
+          : undefined
+        const bottomOnly = columnMap.bottomOnly !== undefined
+          ? parseYesNo(row[columnMap.bottomOnly])
+          : undefined
+        const orientation = columnMap.orientation !== undefined
+          ? parseNumber(row[columnMap.orientation]) ?? undefined
+          : undefined
+        const maxLayers = columnMap.maxLayers !== undefined
+          ? parseNumber(row[columnMap.maxLayers]) ?? undefined
+          : undefined
+        const maxLoad = columnMap.maxLoad !== undefined
+          ? parseNumber(row[columnMap.maxLoad]) ?? undefined
+          : undefined
+        const geometry = columnMap.geometry !== undefined
+          ? parseGeometry(row[columnMap.geometry])
+          : undefined
+        const color = columnMap.color !== undefined
+          ? String(row[columnMap.color] || '') || undefined
+          : undefined
+        const priority = columnMap.priority !== undefined
+          ? parseNumber(row[columnMap.priority]) ?? undefined
+          : undefined
+
         items.push({
           id: generateId(),
-          description: description || `Item ${parsedRows}`,
+          sku,
+          description: description || sku || `Item ${parsedRows}`,
           quantity,
           length: Math.round(length * 100) / 100,
           width: Math.round(width * 100) / 100,
           height: Math.round(height * 100) / 100,
           weight: Math.round(weight),
+          stackable,
+          bottomOnly,
+          orientation,
+          maxLayers,
+          maxLoad,
+          geometry,
+          color,
+          priority,
           raw: headers.reduce((acc, h, idx) => {
             if (h) acc[h] = row[idx]
             return acc
@@ -289,6 +548,11 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
         })
       }
     }
+
+    // If no items found, include raw text for AI fallback
+    const rawText = items.length === 0 && rawTextParts.length > 0
+      ? rawTextParts.join('\n')
+      : undefined
 
     return {
       success: items.length > 0,
@@ -299,6 +563,7 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
         totalRows,
         parsedRows: items.length,
       },
+      rawText,
       error: items.length === 0 ? 'No valid cargo items found in file' : undefined,
     }
   } catch (error) {

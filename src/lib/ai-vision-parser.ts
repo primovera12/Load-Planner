@@ -120,16 +120,21 @@ export async function parseImageWithAI(
         weight: number
       }>
 
-      // Convert to ParsedItem format
-      const parsedItems: ParsedItem[] = items.map((item, index) => ({
-        id: `ai-${Date.now()}-${index}`,
-        description: item.description || `Item ${index + 1}`,
-        quantity: item.quantity || 1,
-        length: item.length || 0,
-        width: item.width || 0,
-        height: item.height || 0,
-        weight: item.weight || 0,
-      }))
+      // Convert to ParsedItem format and validate
+      const parsedItems: ParsedItem[] = items
+        .map((item, index) => ({
+          id: `ai-${Date.now()}-${index}`,
+          description: item.description || `Item ${index + 1}`,
+          quantity: item.quantity || 1,
+          length: item.length || 0,
+          width: item.width || 0,
+          height: item.height || 0,
+          weight: item.weight || 0,
+        }))
+        // Filter out empty items (must have at least one dimension or weight)
+        .filter(item =>
+          item.length > 0 || item.width > 0 || item.height > 0 || item.weight > 0
+        )
 
       return {
         success: parsedItems.length > 0,
@@ -222,15 +227,21 @@ ${text}`
         weight: number
       }>
 
-      const parsedItems: ParsedItem[] = items.map((item, index) => ({
-        id: `ai-${Date.now()}-${index}`,
-        description: item.description || `Item ${index + 1}`,
-        quantity: item.quantity || 1,
-        length: item.length || 0,
-        width: item.width || 0,
-        height: item.height || 0,
-        weight: item.weight || 0,
-      }))
+      // Convert to ParsedItem format and validate
+      const parsedItems: ParsedItem[] = items
+        .map((item, index) => ({
+          id: `ai-${Date.now()}-${index}`,
+          description: item.description || `Item ${index + 1}`,
+          quantity: item.quantity || 1,
+          length: item.length || 0,
+          width: item.width || 0,
+          height: item.height || 0,
+          weight: item.weight || 0,
+        }))
+        // Filter out empty items (must have at least one dimension or weight)
+        .filter(item =>
+          item.length > 0 || item.width > 0 || item.height > 0 || item.weight > 0
+        )
 
       return {
         success: parsedItems.length > 0,
