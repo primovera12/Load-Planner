@@ -46,16 +46,32 @@ function getFileIcon(type: string) {
   return <File className="h-8 w-8 text-gray-500" />
 }
 
-export function UniversalAnalyzer() {
+interface UniversalAnalyzerProps {
+  /** Called when analysis completes successfully */
+  onComplete?: (result: AnalyzeResponse) => void
+  /** Skip automatic redirect to /load-plan (use with onComplete) */
+  skipRedirect?: boolean
+  /** Initial input mode */
+  initialMode?: 'upload' | 'text'
+  /** Initial text value */
+  initialText?: string
+}
+
+export function UniversalAnalyzer({
+  onComplete,
+  skipRedirect = false,
+  initialMode = 'upload',
+  initialText = '',
+}: UniversalAnalyzerProps = {}) {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [file, setFile] = useState<File | null>(null)
-  const [textInput, setTextInput] = useState('')
+  const [textInput, setTextInput] = useState(initialText)
   const [isLoading, setIsLoading] = useState(false)
   const [result, setResult] = useState<AnalyzeResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [inputMode, setInputMode] = useState<'upload' | 'text'>('upload')
+  const [inputMode, setInputMode] = useState<'upload' | 'text'>(initialMode)
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -133,9 +149,16 @@ export function UniversalAnalyzer() {
         setError(data.error)
         setResult(data)
       } else if (data.success) {
-        // Store the result in session storage and redirect to load plan page
-        sessionStorage.setItem('load-plan-result', JSON.stringify(data))
-        router.push('/load-plan')
+        // Call onComplete callback if provided
+        if (onComplete) {
+          onComplete(data)
+        }
+
+        // Redirect to load plan page unless skipRedirect is true
+        if (!skipRedirect) {
+          sessionStorage.setItem('load-plan-result', JSON.stringify(data))
+          router.push('/load-plan')
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')

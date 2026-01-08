@@ -372,10 +372,14 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
 
       if (jsonData.length < 2) continue // Need at least header + 1 row
 
-      // Detect Cargo Planner format by looking for "Decimeters" or "Kilograms" in first rows
+      // Detect unit format by looking for unit hints in first rows
+      // Supports: Decimeters, Kilograms (Cargo Planner), Inches, Pounds, Meters, etc.
       let isCargoPlanner = false
       let usesDecimeters = false
       let usesKilograms = false
+      let usesInches = false
+      let usesPounds = false
+      let usesMeters = false
       for (let i = 0; i < Math.min(5, jsonData.length); i++) {
         const rowStr = (jsonData[i] as unknown[]).join(' ').toLowerCase()
         if (rowStr.includes('decimeter')) {
@@ -386,19 +390,52 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
           isCargoPlanner = true
           usesKilograms = true
         }
+        // Check for inches (common in US shipping) - look for "inches" or "(in)"
+        if (rowStr.match(/\binch(es)?\b/) || rowStr.includes('(in)')) {
+          usesInches = true
+        }
+        // Check for pounds - look for "pounds" or "lbs"
+        if (rowStr.match(/\bpounds?\b/) || rowStr.match(/\blbs?\b/) || rowStr.includes('(lbs)')) {
+          usesPounds = true
+        }
+        // Check for meters
+        if (rowStr.match(/\bmeters?\b/) || rowStr.includes('(m)')) {
+          usesMeters = true
+        }
       }
 
-      // Find the header row (usually first non-empty row with dimension-related words)
+      // Find the header row (the row with actual column headers, not metadata rows)
+      // Header row should have multiple dimension-related column names (not descriptive text like "Length dimensions:")
       let headerRowIndex = 0
       for (let i = 0; i < Math.min(10, jsonData.length); i++) {
         const row = jsonData[i] as unknown[]
+        // Convert row to array of trimmed lowercase strings for column name matching
+        const cells = row.map(cell => String(cell || '').trim().toLowerCase())
         const rowStr = row.join(' ').toLowerCase()
-        // Cargo Planner: look for SKU, Name, Length pattern
-        if (rowStr.match(/^sku.*name.*length/i) || rowStr.match(/length.*width.*height.*weight/i)) {
+
+        // Best match: SKU, Name/Description, Length, Width, Height columns present
+        // This is the Cargo Planner format: "SKU, Name, Length, Width, Height, Weight, Quantity, Stackable..."
+        if (cells.includes('sku') && (cells.includes('name') || cells.includes('description')) &&
+            cells.includes('length') && cells.includes('width') && cells.includes('height')) {
           headerRowIndex = i
           break
         }
-        if (rowStr.match(/length|width|height|weight|description|dimension/i)) {
+
+        // Good match: Multiple dimension columns as separate cells (not as descriptive text)
+        // Check that "length", "width", "height", "weight" are individual column headers
+        const hasLength = cells.some(c => c.match(/^length\s*$/i))
+        const hasWidth = cells.some(c => c.match(/^width\s*$/i))
+        const hasHeight = cells.some(c => c.match(/^height\s*$/i))
+        const hasWeight = cells.some(c => c.match(/^weight\s*$/i))
+        const dimensionColumnCount = [hasLength, hasWidth, hasHeight, hasWeight].filter(Boolean).length
+
+        if (dimensionColumnCount >= 3) {
+          headerRowIndex = i
+          break
+        }
+
+        // Fallback: Classic "L x W x H" style header or item/description column with dimensions
+        if (rowStr.match(/length.*width.*height.*weight/i) && !rowStr.includes('dimensions:')) {
           headerRowIndex = i
           break
         }
@@ -460,9 +497,17 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
           weight = tonsToLbs(tons)
         }
 
-        // Length: check for Cargo Planner decimeters first
-        if (usesDecimeters && columnMap.lengthDecimeters !== undefined) {
-          length = decimetersToFeet(parseNumber(row[columnMap.lengthDecimeters]) || 0)
+        // Length: detect unit from metadata and apply conversion
+        const lengthColIndex = headers.findIndex(h => h.toLowerCase().match(/^length\s*$/i))
+        if (usesDecimeters && (columnMap.lengthDecimeters !== undefined || lengthColIndex >= 0)) {
+          const col = columnMap.lengthDecimeters ?? lengthColIndex
+          length = decimetersToFeet(parseNumber(row[col]) || 0)
+        } else if (usesInches && lengthColIndex >= 0) {
+          // Inches detected in metadata - convert to feet
+          length = inchesToFeet(parseNumber(row[lengthColIndex]) || 0)
+        } else if (usesMeters && lengthColIndex >= 0) {
+          // Meters detected in metadata - convert to feet
+          length = metersToFeet(parseNumber(row[lengthColIndex]) || 0)
         } else if (columnMap.lengthFeet !== undefined) {
           length = parseNumber(row[columnMap.lengthFeet]) || 0
         } else if (columnMap.lengthInches !== undefined) {
@@ -471,10 +516,16 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
           length = metersToFeet(parseNumber(row[columnMap.lengthMeters]) || 0)
         }
 
-        // Width: check for Cargo Planner decimeters
+        // Width: detect unit from metadata and apply conversion
         const widthColIndex = headers.findIndex(h => h.toLowerCase().match(/^width\s*$/i))
         if (usesDecimeters && widthColIndex >= 0) {
           width = decimetersToFeet(parseNumber(row[widthColIndex]) || 0)
+        } else if (usesInches && widthColIndex >= 0) {
+          // Inches detected in metadata - convert to feet
+          width = inchesToFeet(parseNumber(row[widthColIndex]) || 0)
+        } else if (usesMeters && widthColIndex >= 0) {
+          // Meters detected in metadata - convert to feet
+          width = metersToFeet(parseNumber(row[widthColIndex]) || 0)
         } else if (columnMap.widthFeet !== undefined) {
           width = parseNumber(row[columnMap.widthFeet]) || 0
         } else if (columnMap.widthInches !== undefined) {
@@ -483,10 +534,16 @@ export function parseSpreadsheet(data: ArrayBuffer, fileName: string): Universal
           width = metersToFeet(parseNumber(row[columnMap.widthMeters]) || 0)
         }
 
-        // Height: check for Cargo Planner decimeters
+        // Height: detect unit from metadata and apply conversion
         const heightColIndex = headers.findIndex(h => h.toLowerCase().match(/^height\s*$/i))
         if (usesDecimeters && heightColIndex >= 0) {
           height = decimetersToFeet(parseNumber(row[heightColIndex]) || 0)
+        } else if (usesInches && heightColIndex >= 0) {
+          // Inches detected in metadata - convert to feet
+          height = inchesToFeet(parseNumber(row[heightColIndex]) || 0)
+        } else if (usesMeters && heightColIndex >= 0) {
+          // Meters detected in metadata - convert to feet
+          height = metersToFeet(parseNumber(row[heightColIndex]) || 0)
         } else if (columnMap.heightFeet !== undefined) {
           height = parseNumber(row[columnMap.heightFeet]) || 0
         } else if (columnMap.heightInches !== undefined) {
