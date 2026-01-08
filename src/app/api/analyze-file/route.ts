@@ -4,7 +4,7 @@ import { parseImageWithAI, parseTextWithAI } from '@/lib/ai-vision-parser'
 import { selectTrucks } from '@/lib/truck-selector'
 import { ParsedLoad, LoadItem } from '@/types/load'
 import { TruckRecommendation } from '@/types/truck'
-import { PDFParse } from 'pdf-parse'
+// pdf-parse is dynamically imported only when needed to avoid serverless compatibility issues
 
 // Convert ParsedItem to LoadItem
 function toLoadItem(item: ParsedItem): LoadItem {
@@ -106,6 +106,8 @@ export async function POST(request: NextRequest) {
       } else if (fileName.endsWith('.pdf')) {
         // PDF files - extract text and parse using pdf-parse v2 API
         try {
+          // Dynamic import to avoid serverless compatibility issues
+          const { PDFParse } = await import('pdf-parse')
           const buffer = await file.arrayBuffer()
           const pdfParser = new PDFParse({ data: new Uint8Array(buffer) })
           const textResult = await pdfParser.getText()
