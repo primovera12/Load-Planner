@@ -36,6 +36,8 @@ export interface UniversalParseResult {
     totalRows?: number
     parsedRows?: number
     parseMethod?: 'pattern' | 'AI'
+    aiError?: string
+    aiAttempted?: boolean
   }
   error?: string
   rawText?: string // For AI processing
