@@ -17,6 +17,7 @@ import {
   LogIn,
   Share2,
   Code,
+  PackageOpen,
 } from 'lucide-react'
 
 // Check if Clerk is properly configured
@@ -44,6 +45,7 @@ if (isClerkConfigured()) {
 }
 
 const navigation = [
+  { name: 'Load Planner', href: '/load-planner', icon: PackageOpen },
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, protected: true },
   { name: 'Analyze', href: '/analyze', icon: ScanSearch },
   { name: 'Trucks', href: '/trucks', icon: Truck },

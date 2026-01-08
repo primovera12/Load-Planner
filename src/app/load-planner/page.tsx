@@ -103,23 +103,45 @@ export default function LoadPlannerPage() {
     if (!loadPlan || items.length === 0) return
 
     try {
+      // Generate a reference number
+      const reference = `LP-${Date.now().toString(36).toUpperCase()}`
+
       const response = await fetch('/api/generate-load-plan-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, loadPlan })
+        body: JSON.stringify({
+          loadPlan,
+          options: {
+            title: 'Load Plan',
+            reference,
+            date: new Date().toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })
+          }
+        })
       })
 
-      if (response.ok) {
-        const blob = await response.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'load-plan.pdf'
-        a.click()
-        URL.revokeObjectURL(url)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || `Server error: ${response.status}`)
       }
+
+      const blob = await response.blob()
+      if (blob.size === 0) {
+        throw new Error('Generated PDF is empty')
+      }
+
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `load-plan-${reference}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Failed to generate PDF:', err)
+      setError(err instanceof Error ? err.message : 'Failed to generate PDF')
     }
   }
 

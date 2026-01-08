@@ -274,11 +274,74 @@ function findBestTruckForItem(item: LoadItem): { truck: TruckType; score: number
 }
 
 /**
- * Check if two items can share the same truck
+ * Get the effective weight of an item (weight × quantity)
+ */
+function getItemWeight(item: LoadItem): number {
+  return item.weight * (item.quantity || 1)
+}
+
+/**
+ * Calculate total weight of items on a load
+ */
+function getLoadWeight(items: LoadItem[]): number {
+  return items.reduce((sum, item) => sum + getItemWeight(item), 0)
+}
+
+/**
+ * Calculate utilization percentage for a load
+ */
+function getLoadUtilization(items: LoadItem[], truck: TruckType): number {
+  const weight = getLoadWeight(items)
+  return (weight / truck.maxCargoWeight) * 100
+}
+
+/**
+ * Check if an item can be added to a load without exceeding capacity
+ */
+function canAddItemToLoad(
+  item: LoadItem,
+  currentItems: LoadItem[],
+  truck: TruckType,
+  targetUtilization: number = 95
+): { canAdd: boolean; newUtilization: number; reason: string } {
+  const itemWeight = getItemWeight(item)
+  const currentWeight = getLoadWeight(currentItems)
+  const newTotalWeight = currentWeight + itemWeight
+  const newUtilization = (newTotalWeight / truck.maxCargoWeight) * 100
+
+  // HARD LIMIT: Never exceed 100% capacity
+  if (newTotalWeight > truck.maxCargoWeight) {
+    return {
+      canAdd: false,
+      newUtilization,
+      reason: `Would exceed capacity (${newUtilization.toFixed(0)}% > 100%)`
+    }
+  }
+
+  // SOFT LIMIT: Prefer not to exceed target utilization for better balancing
+  // But still allow if no other option (handled in planLoads)
+  if (newUtilization > targetUtilization) {
+    return {
+      canAdd: false,
+      newUtilization,
+      reason: `Would exceed target ${targetUtilization}% utilization`
+    }
+  }
+
+  // Check physical fit
+  if (item.length > truck.deckLength || item.width > truck.deckWidth) {
+    return { canAdd: false, newUtilization, reason: 'Item too large for truck' }
+  }
+
+  return { canAdd: true, newUtilization, reason: '' }
+}
+
+/**
+ * Check if two items can share the same truck (considering quantities)
  */
 function canShareTruck(item1: LoadItem, item2: LoadItem, truck: TruckType): boolean {
-  // Combined weight check
-  const combinedWeight = item1.weight + item2.weight
+  // Combined weight check - use effective weights with quantities
+  const combinedWeight = getItemWeight(item1) + getItemWeight(item2)
   if (combinedWeight > truck.maxCargoWeight) return false
 
   // Check if items can be placed side by side (width-wise)
@@ -317,6 +380,7 @@ function canShareTruck(item1: LoadItem, item2: LoadItem, truck: TruckType): bool
 /**
  * Main load planning function
  * Takes all items and creates an optimal multi-truck plan
+ * Uses intelligent distribution to balance loads across trucks
  */
 export function planLoads(parsedLoad: ParsedLoad): LoadPlan {
   const items = [...parsedLoad.items]
@@ -324,11 +388,18 @@ export function planLoads(parsedLoad: ParsedLoad): LoadPlan {
   const unassignedItems: LoadItem[] = []
   const warnings: string[] = []
 
-  // Sort items by weight (heaviest first) - greedy approach
-  items.sort((a, b) => b.weight - a.weight)
+  // Sort items by effective weight (weight × quantity, heaviest first)
+  items.sort((a, b) => getItemWeight(b) - getItemWeight(a))
+
+  // Target utilization for balanced loading (aim for 85% to leave room for optimization)
+  const TARGET_UTILIZATION = 85
+  // Hard limit - never exceed this
+  const MAX_UTILIZATION = 100
 
   // Process each item
   for (const item of items) {
+    const itemWeight = getItemWeight(item)
+
     // Find the best truck for this individual item
     const { truck: bestTruck, score, isLegal, permits } = findBestTruckForItem(item)
 
@@ -336,50 +407,90 @@ export function planLoads(parsedLoad: ParsedLoad): LoadPlan {
     const fitsAnyTruck = trucks.some(t =>
       item.length <= t.deckLength &&
       item.width <= t.deckWidth &&
-      item.weight <= t.maxCargoWeight
+      itemWeight <= t.maxCargoWeight
     )
 
     if (!fitsAnyTruck) {
       unassignedItems.push(item)
-      warnings.push(`Item "${item.description}" (${item.length}'L x ${item.width}'W x ${item.height}'H, ${item.weight.toLocaleString()} lbs) exceeds all truck capacities`)
+      warnings.push(`Item "${item.description}" (${item.length}'L x ${item.width}'W x ${item.height}'H, ${itemWeight.toLocaleString()} lbs) exceeds all truck capacities`)
       continue
     }
 
-    // Try to add to an existing load
-    let added = false
-    for (const load of loads) {
-      // Check if this item can share the truck with existing items
-      const canAdd = load.items.every(existingItem =>
+    // Find the best existing load to add this item to
+    let bestLoad: PlannedLoad | null = null
+    let bestLoadIndex = -1
+    let bestNewUtilization = Infinity
+
+    for (let i = 0; i < loads.length; i++) {
+      const load = loads[i]
+
+      // Check physical compatibility
+      const canPhysicallyFit = load.items.every(existingItem =>
         canShareTruck(existingItem, item, load.recommendedTruck)
       )
+      if (!canPhysicallyFit) continue
 
-      // Also check combined weight
-      const newWeight = load.weight + item.weight
-      if (canAdd && newWeight <= load.recommendedTruck.maxCargoWeight) {
-        // Add item to this load
-        load.items.push(item)
-        load.weight = newWeight
-        load.length = Math.max(load.length, item.length)
-        load.width = Math.max(load.width, item.width)
-        load.height = Math.max(load.height, item.height)
+      // Check weight capacity with new helper
+      const { canAdd, newUtilization } = canAddItemToLoad(
+        item,
+        load.items,
+        load.recommendedTruck,
+        TARGET_UTILIZATION
+      )
 
-        // Re-evaluate truck choice if needed
-        const { truck: newBestTruck, score: newScore, isLegal: newIsLegal, permits: newPermits } =
-          findBestTruckForLoad(load)
-        load.recommendedTruck = newBestTruck
-        load.truckScore = newScore
-        load.isLegal = newIsLegal
-        load.permitsRequired = newPermits
-        // Recalculate placements with new item
-        load.placements = calculatePlacements(load.items, newBestTruck)
-
-        added = true
-        break
+      // If this load can accept the item and results in better balance, use it
+      if (canAdd && newUtilization < bestNewUtilization) {
+        bestLoad = load
+        bestLoadIndex = i
+        bestNewUtilization = newUtilization
       }
     }
 
-    // If couldn't add to existing load, create new load
-    if (!added) {
+    // If no load found under target, try again with hard limit
+    if (!bestLoad) {
+      for (let i = 0; i < loads.length; i++) {
+        const load = loads[i]
+
+        const canPhysicallyFit = load.items.every(existingItem =>
+          canShareTruck(existingItem, item, load.recommendedTruck)
+        )
+        if (!canPhysicallyFit) continue
+
+        const { canAdd, newUtilization } = canAddItemToLoad(
+          item,
+          load.items,
+          load.recommendedTruck,
+          MAX_UTILIZATION  // Use hard limit
+        )
+
+        if (canAdd && newUtilization < bestNewUtilization) {
+          bestLoad = load
+          bestLoadIndex = i
+          bestNewUtilization = newUtilization
+        }
+      }
+    }
+
+    // Add to best existing load or create new one
+    if (bestLoad) {
+      // Add item to this load
+      bestLoad.items.push(item)
+      bestLoad.weight = getLoadWeight(bestLoad.items)
+      bestLoad.length = Math.max(bestLoad.length, item.length)
+      bestLoad.width = Math.max(bestLoad.width, item.width)
+      bestLoad.height = Math.max(bestLoad.height, item.height)
+
+      // Re-evaluate truck choice for combined load
+      const { truck: newBestTruck, score: newScore, isLegal: newIsLegal, permits: newPermits } =
+        findBestTruckForLoad(bestLoad)
+      bestLoad.recommendedTruck = newBestTruck
+      bestLoad.truckScore = newScore
+      bestLoad.isLegal = newIsLegal
+      bestLoad.permitsRequired = newPermits
+      // Recalculate placements with new item
+      bestLoad.placements = calculatePlacements(bestLoad.items, newBestTruck)
+    } else {
+      // Create new load
       const loadWarnings: string[] = []
 
       // Generate warnings
@@ -400,7 +511,7 @@ export function planLoads(parsedLoad: ParsedLoad): LoadPlan {
         length: item.length,
         width: item.width,
         height: item.height,
-        weight: item.weight,
+        weight: itemWeight,
         recommendedTruck: bestTruck,
         truckScore: score,
         placements: calculatePlacements([item], bestTruck),
@@ -411,9 +522,13 @@ export function planLoads(parsedLoad: ParsedLoad): LoadPlan {
     }
   }
 
-  // Calculate totals
-  const totalWeight = loads.reduce((sum, load) => sum + load.weight, 0)
-  const totalItems = loads.reduce((sum, load) => sum + load.items.length, 0)
+  // Post-processing: Try to rebalance if loads are very uneven
+  rebalanceLoads(loads)
+
+  // Calculate totals using effective weights
+  const totalWeight = loads.reduce((sum, load) => sum + getLoadWeight(load.items), 0)
+  const totalItems = loads.reduce((sum, load) =>
+    sum + load.items.reduce((s, i) => s + (i.quantity || 1), 0), 0)
 
   // Add summary warnings
   if (loads.length > 1) {
@@ -421,6 +536,14 @@ export function planLoads(parsedLoad: ParsedLoad): LoadPlan {
   }
   if (unassignedItems.length > 0) {
     warnings.push(`${unassignedItems.length} item(s) could not be assigned - may require specialized transport`)
+  }
+
+  // Check for any overloaded trucks and add warnings
+  for (const load of loads) {
+    const utilization = getLoadUtilization(load.items, load.recommendedTruck)
+    if (utilization > 100) {
+      warnings.push(`Warning: ${load.id} is at ${utilization.toFixed(0)}% capacity - consider redistribution`)
+    }
   }
 
   return {
@@ -434,6 +557,82 @@ export function planLoads(parsedLoad: ParsedLoad): LoadPlan {
 }
 
 /**
+ * Post-processing: Try to move items between loads for better balance
+ */
+function rebalanceLoads(loads: PlannedLoad[]): void {
+  if (loads.length < 2) return
+
+  // Calculate utilizations
+  const utilizations = loads.map(load => ({
+    load,
+    utilization: getLoadUtilization(load.items, load.recommendedTruck)
+  }))
+
+  // Sort by utilization (highest first)
+  utilizations.sort((a, b) => b.utilization - a.utilization)
+
+  // Try to move items from overloaded trucks to underloaded ones
+  for (let i = 0; i < utilizations.length - 1; i++) {
+    const highLoad = utilizations[i]
+    if (highLoad.utilization <= 90) continue // Already balanced
+
+    for (let j = utilizations.length - 1; j > i; j--) {
+      const lowLoad = utilizations[j]
+      if (lowLoad.utilization >= 80) continue // Already fairly loaded
+
+      // Try to move smallest item from high to low
+      const movableItems = highLoad.load.items
+        .filter(item => {
+          const { canAdd } = canAddItemToLoad(item, lowLoad.load.items, lowLoad.load.recommendedTruck, 95)
+          return canAdd
+        })
+        .sort((a, b) => getItemWeight(a) - getItemWeight(b))
+
+      if (movableItems.length > 0) {
+        const itemToMove = movableItems[0]
+
+        // Remove from high load
+        highLoad.load.items = highLoad.load.items.filter(i => i.id !== itemToMove.id)
+        highLoad.load.weight = getLoadWeight(highLoad.load.items)
+
+        // Add to low load
+        lowLoad.load.items.push(itemToMove)
+        lowLoad.load.weight = getLoadWeight(lowLoad.load.items)
+
+        // Update dimensions
+        highLoad.load.length = Math.max(...highLoad.load.items.map(i => i.length), 0)
+        highLoad.load.width = Math.max(...highLoad.load.items.map(i => i.width), 0)
+        highLoad.load.height = Math.max(...highLoad.load.items.map(i => i.height), 0)
+
+        lowLoad.load.length = Math.max(...lowLoad.load.items.map(i => i.length))
+        lowLoad.load.width = Math.max(...lowLoad.load.items.map(i => i.width))
+        lowLoad.load.height = Math.max(...lowLoad.load.items.map(i => i.height))
+
+        // Recalculate placements
+        highLoad.load.placements = calculatePlacements(highLoad.load.items, highLoad.load.recommendedTruck)
+        lowLoad.load.placements = calculatePlacements(lowLoad.load.items, lowLoad.load.recommendedTruck)
+
+        // Update utilizations for next iteration
+        highLoad.utilization = getLoadUtilization(highLoad.load.items, highLoad.load.recommendedTruck)
+        lowLoad.utilization = getLoadUtilization(lowLoad.load.items, lowLoad.load.recommendedTruck)
+      }
+    }
+  }
+
+  // Remove any empty loads
+  for (let i = loads.length - 1; i >= 0; i--) {
+    if (loads[i].items.length === 0) {
+      loads.splice(i, 1)
+    }
+  }
+
+  // Renumber loads
+  loads.forEach((load, index) => {
+    load.id = `load-${index + 1}`
+  })
+}
+
+/**
  * Find best truck for an entire load (multiple items)
  */
 function findBestTruckForLoad(load: PlannedLoad): { truck: TruckType; score: number; isLegal: boolean; permits: string[] } {
@@ -441,7 +640,8 @@ function findBestTruckForLoad(load: PlannedLoad): { truck: TruckType; score: num
   const maxLength = Math.max(...load.items.map(i => i.length))
   const maxWidth = Math.max(...load.items.map(i => i.width))
   const maxHeight = Math.max(...load.items.map(i => i.height))
-  const totalWeight = load.items.reduce((sum, i) => sum + i.weight, 0)
+  // Use effective weights (weight × quantity)
+  const totalWeight = getLoadWeight(load.items)
 
   // Create a virtual "item" representing the load requirements
   const virtualItem: LoadItem = {

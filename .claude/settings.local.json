@@ -30,7 +30,12 @@
       "Bash(node read-excel.js:*)",
       "Bash(npm ls:*)",
       "Bash(python3:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(timeout:*)",
+      "Bash(ping:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(vercel:*)"
     ]
   }
 }
