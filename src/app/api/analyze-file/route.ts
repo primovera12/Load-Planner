@@ -355,6 +355,10 @@ export async function POST(request: NextRequest) {
       rawText: parseResult.rawText,
       error: parseResult.error,
       warning,
+      // Debug: include sample of raw items before processing
+      debug: {
+        sampleItems: parseResult.items.slice(0, 3),
+      },
     })
   } catch (error) {
     console.error('Analyze file error:', error)
