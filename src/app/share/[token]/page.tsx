@@ -23,7 +23,12 @@ import {
   Lock,
   Eye,
   EyeOff,
+  ThumbsUp,
+  ThumbsDown,
+  X,
+  MessageSquare,
 } from 'lucide-react'
+import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { generateQuotePDF } from '@/lib/pdf-generator'
 
@@ -63,6 +68,25 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
   const [showPassword, setShowPassword] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [verifying, setVerifying] = useState(false)
+
+  // Response modal state
+  const [showResponseModal, setShowResponseModal] = useState(false)
+  const [responseType, setResponseType] = useState<'accept' | 'decline' | null>(null)
+  const [respondentName, setRespondentName] = useState('')
+  const [respondentEmail, setRespondentEmail] = useState('')
+  const [responseMessage, setResponseMessage] = useState('')
+  const [submittingResponse, setSubmittingResponse] = useState(false)
+  const [responseSuccess, setResponseSuccess] = useState<string | null>(null)
+  const [responseError, setResponseError] = useState<string | null>(null)
+
+  // Feedback form state
+  const [showFeedbackForm, setShowFeedbackForm] = useState(false)
+  const [feedbackMessage, setFeedbackMessage] = useState('')
+  const [feedbackName, setFeedbackName] = useState('')
+  const [feedbackEmail, setFeedbackEmail] = useState('')
+  const [submittingFeedback, setSubmittingFeedback] = useState(false)
+  const [feedbackSuccess, setFeedbackSuccess] = useState(false)
+  const [feedbackError, setFeedbackError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchSharedData()
@@ -139,6 +163,111 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
   function handlePrint() {
     trackAction('print')
     window.print()
+  }
+
+  function openResponseModal(type: 'accept' | 'decline') {
+    setResponseType(type)
+    setShowResponseModal(true)
+    setResponseError(null)
+  }
+
+  function closeResponseModal() {
+    setShowResponseModal(false)
+    setResponseType(null)
+    setRespondentName('')
+    setRespondentEmail('')
+    setResponseMessage('')
+    setResponseError(null)
+  }
+
+  async function submitResponse() {
+    if (!responseType) return
+
+    setSubmittingResponse(true)
+    setResponseError(null)
+
+    try {
+      const headers: HeadersInit = { 'Content-Type': 'application/json' }
+      if (password) {
+        headers['x-share-password'] = password
+      }
+
+      const response = await fetch(`/api/share/${token}/respond`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          response: responseType,
+          respondentName: respondentName || undefined,
+          respondentEmail: respondentEmail || undefined,
+          message: responseMessage || undefined,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (response.ok) {
+        setResponseSuccess(result.message)
+        closeResponseModal()
+        // Update the entity status in local state
+        if (data) {
+          setData({
+            ...data,
+            entity: {
+              ...data.entity,
+              status: result.newStatus,
+              ...(responseType === 'accept' ? { acceptedAt: new Date().toISOString() } : { declinedAt: new Date().toISOString() }),
+            },
+          })
+        }
+      } else {
+        setResponseError(result.error || 'Failed to submit response')
+      }
+    } catch (err) {
+      setResponseError('An error occurred. Please try again.')
+    } finally {
+      setSubmittingResponse(false)
+    }
+  }
+
+  async function submitFeedback() {
+    if (!feedbackMessage.trim()) {
+      setFeedbackError('Please enter a message')
+      return
+    }
+
+    setSubmittingFeedback(true)
+    setFeedbackError(null)
+
+    try {
+      const headers: HeadersInit = { 'Content-Type': 'application/json' }
+      if (password) {
+        headers['x-share-password'] = password
+      }
+
+      const response = await fetch(`/api/share/${token}/comment`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          message: feedbackMessage,
+          authorName: feedbackName || undefined,
+          authorEmail: feedbackEmail || undefined,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (response.ok) {
+        setFeedbackSuccess(true)
+        setFeedbackMessage('')
+        setShowFeedbackForm(false)
+      } else {
+        setFeedbackError(result.error || 'Failed to submit feedback')
+      }
+    } catch (err) {
+      setFeedbackError('An error occurred. Please try again.')
+    } finally {
+      setSubmittingFeedback(false)
+    }
   }
 
   const formatCurrency = (amount: number) =>
@@ -243,6 +372,9 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
 
   const { entity, owner, permissions, expiresAt, entityType } = data
 
+  // Check if quote can be responded to
+  const canRespond = entityType === 'QUOTE' && !['ACCEPTED', 'DECLINED', 'EXPIRED'].includes(entity.status)
+
   return (
     <div className="min-h-screen bg-gray-50 print:bg-white">
       {/* Header */}
@@ -275,6 +407,14 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
       </header>
 
       <main className="container mx-auto px-4 py-8 max-w-4xl">
+        {/* Response Success Message */}
+        {responseSuccess && (
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3 print:hidden">
+            <CheckCircle className="h-5 w-5 text-green-600" />
+            <span className="text-green-800 font-medium">{responseSuccess}</span>
+          </div>
+        )}
+
         {/* Expiration Warning */}
         {expiresAt && (
           <div className="mb-6 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center gap-2 print:hidden">
@@ -288,11 +428,267 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
         {entityType === 'QUOTE' && <QuoteView entity={entity} owner={owner} />}
         {entityType === 'LOAD' && <LoadView entity={entity} owner={owner} />}
 
+        {/* Accept/Decline Buttons for Quotes */}
+        {canRespond && (
+          <Card className="mt-6 print:hidden">
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <h3 className="text-lg font-semibold mb-2">Ready to proceed?</h3>
+                <p className="text-muted-foreground mb-4">
+                  Accept this quote to confirm the shipment, or decline if you need changes.
+                </p>
+                <div className="flex justify-center gap-4">
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    onClick={() => openResponseModal('decline')}
+                    className="gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                  >
+                    <ThumbsDown className="h-5 w-5" />
+                    Decline Quote
+                  </Button>
+                  <Button
+                    size="lg"
+                    onClick={() => openResponseModal('accept')}
+                    className="gap-2 bg-green-600 hover:bg-green-700"
+                  >
+                    <ThumbsUp className="h-5 w-5" />
+                    Accept Quote
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Feedback Section for Quotes */}
+        {entityType === 'QUOTE' && (
+          <Card className="mt-6 print:hidden">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5" />
+                Questions or Feedback
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {feedbackSuccess ? (
+                <div className="text-center py-4">
+                  <CheckCircle className="h-10 w-10 text-green-600 mx-auto mb-3" />
+                  <p className="font-medium text-green-800">Thank you for your feedback!</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    We've received your message and will respond soon.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => {
+                      setFeedbackSuccess(false)
+                      setShowFeedbackForm(true)
+                    }}
+                  >
+                    Send Another Message
+                  </Button>
+                </div>
+              ) : showFeedbackForm ? (
+                <div className="space-y-4">
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="feedbackName">Your Name (optional)</Label>
+                      <Input
+                        id="feedbackName"
+                        value={feedbackName}
+                        onChange={(e) => setFeedbackName(e.target.value)}
+                        placeholder="Enter your name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="feedbackEmail">Your Email (optional)</Label>
+                      <Input
+                        id="feedbackEmail"
+                        type="email"
+                        value={feedbackEmail}
+                        onChange={(e) => setFeedbackEmail(e.target.value)}
+                        placeholder="Enter your email"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="feedbackMessage">Message</Label>
+                    <Textarea
+                      id="feedbackMessage"
+                      value={feedbackMessage}
+                      onChange={(e) => setFeedbackMessage(e.target.value)}
+                      placeholder="Enter your question or feedback..."
+                      rows={4}
+                    />
+                  </div>
+
+                  {feedbackError && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                      {feedbackError}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowFeedbackForm(false)}
+                      disabled={submittingFeedback}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={submitFeedback}
+                      disabled={submittingFeedback || !feedbackMessage.trim()}
+                      className="gap-2"
+                    >
+                      {submittingFeedback ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Sending...
+                        </>
+                      ) : (
+                        <>
+                          <Mail className="h-4 w-4" />
+                          Send Message
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <p className="text-muted-foreground mb-4">
+                    Have a question or want to provide feedback? We'd love to hear from you.
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowFeedbackForm(true)}
+                    className="gap-2"
+                  >
+                    <MessageSquare className="h-4 w-4" />
+                    Leave Feedback
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Footer */}
         <div className="mt-8 pt-6 border-t text-center text-sm text-muted-foreground print:mt-16">
           <p>Shared via Load Planner - AI-Powered Freight Solutions</p>
         </div>
       </main>
+
+      {/* Response Modal */}
+      {showResponseModal && (
+        <>
+          <div className="fixed inset-0 bg-black/50 z-50" onClick={closeResponseModal} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <Card className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+              <CardHeader className="relative">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-4 top-4"
+                  onClick={closeResponseModal}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+                <div className={cn(
+                  "mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-2",
+                  responseType === 'accept' ? "bg-green-100" : "bg-red-100"
+                )}>
+                  {responseType === 'accept' ? (
+                    <ThumbsUp className="h-6 w-6 text-green-600" />
+                  ) : (
+                    <ThumbsDown className="h-6 w-6 text-red-600" />
+                  )}
+                </div>
+                <CardTitle className="text-center">
+                  {responseType === 'accept' ? 'Accept Quote' : 'Decline Quote'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="respondentName">Your Name (optional)</Label>
+                  <Input
+                    id="respondentName"
+                    value={respondentName}
+                    onChange={(e) => setRespondentName(e.target.value)}
+                    placeholder="Enter your name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="respondentEmail">Your Email (optional)</Label>
+                  <Input
+                    id="respondentEmail"
+                    type="email"
+                    value={respondentEmail}
+                    onChange={(e) => setRespondentEmail(e.target.value)}
+                    placeholder="Enter your email"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="responseMessage">
+                    {responseType === 'accept' ? 'Additional Comments' : 'Reason for Declining'} (optional)
+                  </Label>
+                  <Textarea
+                    id="responseMessage"
+                    value={responseMessage}
+                    onChange={(e) => setResponseMessage(e.target.value)}
+                    placeholder={responseType === 'accept'
+                      ? "Any special instructions or comments..."
+                      : "Please let us know what changes you'd like..."
+                    }
+                    rows={3}
+                  />
+                </div>
+
+                {responseError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                    {responseError}
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={closeResponseModal}
+                    disabled={submittingResponse}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    className={cn(
+                      "flex-1 gap-2",
+                      responseType === 'accept'
+                        ? "bg-green-600 hover:bg-green-700"
+                        : "bg-red-600 hover:bg-red-700"
+                    )}
+                    onClick={submitResponse}
+                    disabled={submittingResponse}
+                  >
+                    {submittingResponse ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        {responseType === 'accept' ? 'Accept' : 'Decline'}
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
     </div>
   )
 }

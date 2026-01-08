@@ -34,6 +34,8 @@ export async function GET(request: NextRequest) {
       isOneTimeLink: share.maxAccessCount === 1,
       autoExtend: share.autoExtend,
       extendDays: share.extendDays,
+      recipientName: share.recipientName,
+      recipientEmail: share.recipientEmail,
     }))
 
     return NextResponse.json(transformedShares)
@@ -63,6 +65,8 @@ export async function POST(request: NextRequest) {
       maxAccessCount,
       autoExtend = false,
       extendDays = 7,
+      recipientName,
+      recipientEmail,
     } = body
 
     // Validate entity type
@@ -122,6 +126,8 @@ export async function POST(request: NextRequest) {
         maxAccessCount: finalMaxAccessCount,
         autoExtend: expiresAt ? autoExtend : false, // Only enable if there's an expiration
         extendDays: extendDays > 0 ? extendDays : 7,
+        recipientName: recipientName?.trim() || undefined,
+        recipientEmail: recipientEmail?.trim() || undefined,
         createdById: user.id,
       },
     })
@@ -138,6 +144,8 @@ export async function POST(request: NextRequest) {
       isOneTimeLink: finalMaxAccessCount === 1,
       autoExtend: share.autoExtend,
       extendDays: share.extendDays,
+      recipientName: share.recipientName,
+      recipientEmail: share.recipientEmail,
     }, { status: 201 })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

@@ -27,6 +27,7 @@ import {
   Globe,
   RefreshCw,
   Mail,
+  User,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -51,6 +52,8 @@ interface ShareLink {
   maxAccessCount: number | null
   autoExtend: boolean
   extendDays: number
+  recipientName: string | null
+  recipientEmail: string | null
 }
 
 interface AccessLog {
@@ -139,6 +142,8 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
   const [isOneTimeLink, setIsOneTimeLink] = useState(false)
   const [autoExtend, setAutoExtend] = useState(false)
   const [extendDays, setExtendDays] = useState('7')
+  const [recipientName, setRecipientName] = useState('')
+  const [recipientEmail, setRecipientEmail] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
   const [showPasswordInput, setShowPasswordInput] = useState(false)
 
@@ -163,6 +168,8 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
     setIsOneTimeLink(false)
     setAutoExtend(false)
     setExtendDays('7')
+    setRecipientName('')
+    setRecipientEmail('')
     setSelectedTemplate(null)
     setShowPasswordInput(false)
   }
@@ -199,6 +206,8 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
           isOneTimeLink,
           autoExtend: expiresInDays ? autoExtend : false,
           extendDays: parseInt(extendDays) || 7,
+          recipientName: recipientName || undefined,
+          recipientEmail: recipientEmail || undefined,
         }),
       })
 
@@ -519,6 +528,35 @@ Best regards`
                       </label>
                     </div>
 
+                    {/* Recipient Tracking */}
+                    <div className="border-t pt-3 space-y-3">
+                      <p className="text-xs text-muted-foreground font-medium">Recipient Tracking (optional)</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Name</Label>
+                          <Input
+                            placeholder="John Smith"
+                            value={recipientName}
+                            onChange={(e) => setRecipientName(e.target.value)}
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Email</Label>
+                          <Input
+                            type="email"
+                            placeholder="john@company.com"
+                            value={recipientEmail}
+                            onChange={(e) => setRecipientEmail(e.target.value)}
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Track who received this link for easy identification
+                      </p>
+                    </div>
+
                     <Button onClick={createShareLink} disabled={creating} className="w-full gap-2">
                       {creating ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -777,6 +815,11 @@ Best regards`
 
                           {/* Permissions & Security Badges */}
                           <div className="flex items-center flex-wrap gap-2 mt-2">
+                            {(link.recipientName || link.recipientEmail) && (
+                              <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
+                                <User className="h-3 w-3" /> {link.recipientName || link.recipientEmail}
+                              </span>
+                            )}
                             {link.hasPassword && (
                               <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full">
                                 <Lock className="h-3 w-3" /> Password

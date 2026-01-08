@@ -199,6 +199,7 @@ model Quote {
   customer        Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
   loadId          String?
   load            Load?       @relation(fields: [loadId], references: [id], onDelete: SetNull)
+  comments        QuoteComment[]
 
   @@map("quotes")
 }
@@ -297,6 +298,10 @@ model ShareToken {
   entityType    ShareEntityType
   entityId      String
 
+  // Recipient tracking
+  recipientName  String?        // Name of intended recipient
+  recipientEmail String?        // Email of intended recipient
+
   // Permissions
   allowDownload Boolean         @default(true)
   allowPrint    Boolean         @default(true)
@@ -348,4 +353,31 @@ model ShareAccessLog {
 enum ShareEntityType {
   QUOTE
   LOAD
+}
+
+// ============================================
+// QUOTE COMMENTS/FEEDBACK
+// ============================================
+
+model QuoteComment {
+  id            String    @id @default(cuid())
+  quoteId       String
+  quote         Quote     @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  // Comment details
+  message       String
+  authorName    String?   // Name of person commenting
+  authorEmail   String?   // Email of person commenting
+
+  // Tracking
+  shareTokenId  String?   // Which share link was used
+  ipAddress     String?
+  userAgent     String?
+
+  // Status
+  isRead        Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+
+  @@index([quoteId])
+  @@map("quote_comments")
 }
