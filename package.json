@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/primovera12/Load-Planner#readme",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "@clerk/nextjs": "^6.36.6",
     "@google/generative-ai": "^0.24.1",
     "@googlemaps/google-maps-services-js": "^3.4.2",
