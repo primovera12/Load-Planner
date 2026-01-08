@@ -23,6 +23,11 @@ export interface AIParseResult {
   items: ParsedItem[]
   rawResponse?: string
   error?: string
+  debugInfo?: {
+    rawItemCount: number
+    filteredItemCount: number
+    sampleRawItem: unknown
+  }
 }
 
 const VISION_PROMPT = `You are analyzing an image that contains cargo or freight information for load planning.
@@ -236,6 +241,9 @@ ${text}`
     const response = await result.response
     const responseText = response.text()
 
+    // Log raw AI response for debugging
+    console.log('AI raw response (first 2000 chars):', responseText.substring(0, 2000))
+
     try {
       let jsonStr = responseText
       const jsonMatch = responseText.match(/\[[\s\S]*\]/)
@@ -254,6 +262,9 @@ ${text}`
         stackable?: boolean
         priority?: number
       }>
+
+      // Log parsed items for debugging
+      console.log('AI parsed items (first 3):', JSON.stringify(items.slice(0, 3), null, 2))
 
       // Convert to ParsedItem format and validate
       const parsedItems: ParsedItem[] = items
@@ -278,13 +289,20 @@ ${text}`
         success: parsedItems.length > 0,
         items: parsedItems,
         rawResponse: responseText,
+        // Include debug info
+        debugInfo: {
+          rawItemCount: items.length,
+          filteredItemCount: parsedItems.length,
+          sampleRawItem: items[0],
+        },
       }
-    } catch {
+    } catch (parseError) {
+      console.error('JSON parse error:', parseError)
       return {
         success: false,
         items: [],
         rawResponse: responseText,
-        error: 'Could not parse AI response',
+        error: `Could not parse AI response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`,
       }
     }
   } catch (error) {

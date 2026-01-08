@@ -132,6 +132,7 @@ export async function POST(request: NextRequest) {
             itemCount: aiResult.items.length,
             error: aiResult.error,
             firstItem: aiResult.items[0],
+            debugInfo: aiResult.debugInfo,
           })
 
           if (aiResult.success && aiResult.items.length > 0) {
@@ -143,6 +144,7 @@ export async function POST(request: NextRequest) {
                 fileType: fileName.endsWith('.csv') ? 'CSV' : 'Excel',
                 parsedRows: aiResult.items.length,
                 parseMethod: 'AI',
+                aiDebugInfo: aiResult.debugInfo,
               },
               rawText: fullText,
             }
