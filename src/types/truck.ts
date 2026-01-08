@@ -8,6 +8,14 @@ export type TrailerCategory =
   | 'DOUBLE_DROP'
   | 'LANDOLL'
   | 'CONESTOGA'
+  | 'DRY_VAN'
+  | 'REEFER'
+  | 'CURTAIN_SIDE'
+  | 'MULTI_AXLE'
+  | 'SCHNABEL'
+  | 'PERIMETER'
+  | 'STEERABLE'
+  | 'BLADE'
 
 export interface TruckType {
   id: string

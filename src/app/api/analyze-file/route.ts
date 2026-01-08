@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { parseSpreadsheet, parsePDFText, parseText, UniversalParseResult, ParsedItem } from '@/lib/universal-parser'
 import { parseImageWithAI, parseTextWithAI } from '@/lib/ai-vision-parser'
 import { selectTrucks } from '@/lib/truck-selector'
-import { planLoads, LoadPlan } from '@/lib/load-planner'
+import { planLoads } from '@/lib/load-planner'
 import { ParsedLoad, LoadItem } from '@/types/load'
 import { TruckRecommendation } from '@/types/truck'
 // pdf-parse is dynamically imported only when needed to avoid serverless compatibility issues
@@ -355,17 +355,43 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate full load plan (multi-truck planning)
-    let loadPlan: LoadPlan | null = null
+    let loadPlan = null
     if (parsedLoad.items.length > 0) {
-      loadPlan = planLoads(parsedLoad)
+      const rawPlan = planLoads(parsedLoad)
+
+      // Transform to frontend format (rename recommendedTruck to truck, add utilization)
+      loadPlan = {
+        loads: rawPlan.loads.map(load => {
+          const totalWeight = load.items.reduce((sum, i) => sum + (i.weight * i.quantity), 0)
+          const totalArea = load.items.reduce((sum, i) => sum + (i.length * i.width * i.quantity), 0)
+          const truckArea = load.recommendedTruck.deckLength * load.recommendedTruck.deckWidth
+
+          return {
+            id: load.id,
+            items: load.items,
+            truck: load.recommendedTruck, // Frontend expects 'truck'
+            placements: load.placements,
+            utilization: {
+              weight: Math.round((totalWeight / load.recommendedTruck.maxCargoWeight) * 100),
+              space: Math.round((totalArea / truckArea) * 100)
+            },
+            warnings: load.warnings
+          }
+        }),
+        totalTrucks: rawPlan.totalTrucks,
+        totalWeight: rawPlan.totalWeight,
+        totalItems: rawPlan.totalItems,
+        warnings: rawPlan.warnings
+      }
+
       console.log('Load plan generated:', {
         totalTrucks: loadPlan.totalTrucks,
         totalWeight: loadPlan.totalWeight,
         loads: loadPlan.loads.map(l => ({
           id: l.id,
-          truck: l.recommendedTruck.name,
+          truck: l.truck.name,
           items: l.items.length,
-          weight: l.weight,
+          utilization: l.utilization,
         })),
       })
     }

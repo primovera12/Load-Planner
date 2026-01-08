@@ -12,6 +12,13 @@ import { TruckType, TruckRecommendation } from '@/types/truck'
 import { trucks } from '@/data/trucks'
 import { LEGAL_LIMITS } from '@/types'
 
+export interface ItemPlacement {
+  itemId: string
+  x: number // position from front of trailer (feet)
+  z: number // position from left edge (feet)
+  rotated: boolean
+}
+
 export interface PlannedLoad {
   id: string
   items: LoadItem[]
@@ -23,6 +30,8 @@ export interface PlannedLoad {
   // Truck recommendation for this specific load
   recommendedTruck: TruckType
   truckScore: number
+  // Item placements for visualization
+  placements: ItemPlacement[]
   // Permits needed
   permitsRequired: string[]
   // Warnings
@@ -42,6 +51,160 @@ export interface LoadPlan {
   unassignedItems: LoadItem[]
   // Overall warnings
   warnings: string[]
+}
+
+/**
+ * Calculate optimal placements for items on a truck deck
+ * Uses a simple bin-packing algorithm (bottom-left first fit)
+ */
+function calculatePlacements(items: LoadItem[], truck: TruckType): ItemPlacement[] {
+  const placements: ItemPlacement[] = []
+  const occupiedAreas: { x: number; z: number; length: number; width: number }[] = []
+
+  // Sort items by area (largest first for better packing)
+  const sortedItems = [...items].sort((a, b) =>
+    (b.length * b.width) - (a.length * a.width)
+  )
+
+  for (const item of sortedItems) {
+    const placement = findBestPlacement(item, truck, occupiedAreas)
+    if (placement) {
+      placements.push(placement)
+      const itemLength = placement.rotated ? item.width : item.length
+      const itemWidth = placement.rotated ? item.length : item.width
+      occupiedAreas.push({
+        x: placement.x,
+        z: placement.z,
+        length: itemLength,
+        width: itemWidth
+      })
+    } else {
+      // Fallback: place at origin if no space found (shouldn't happen if canShareTruck works)
+      placements.push({
+        itemId: item.id,
+        x: 0,
+        z: 0,
+        rotated: false
+      })
+    }
+  }
+
+  return placements
+}
+
+/**
+ * Find the best position for an item on the deck
+ */
+function findBestPlacement(
+  item: LoadItem,
+  truck: TruckType,
+  occupiedAreas: { x: number; z: number; length: number; width: number }[]
+): ItemPlacement | null {
+  const candidates: { x: number; z: number; rotated: boolean; score: number }[] = []
+
+  // Try both orientations
+  const orientations = [
+    { length: item.length, width: item.width, rotated: false },
+    { length: item.width, width: item.length, rotated: true }
+  ]
+
+  // Only try rotation if dimensions differ
+  const tryRotation = item.length !== item.width
+
+  for (const orientation of tryRotation ? orientations : [orientations[0]]) {
+    // Check if this orientation fits on truck
+    if (orientation.length > truck.deckLength || orientation.width > truck.deckWidth) {
+      continue
+    }
+
+    // Try positions from front-left corner, moving right then back
+    const stepSize = 0.5 // Half-foot increments for finer placement
+
+    for (let x = 0; x <= truck.deckLength - orientation.length; x += stepSize) {
+      for (let z = 0; z <= truck.deckWidth - orientation.width; z += stepSize) {
+        // Check if this position overlaps with existing items
+        const testArea = {
+          x,
+          z,
+          length: orientation.length,
+          width: orientation.width
+        }
+
+        if (!isAreaOccupied(testArea, occupiedAreas)) {
+          // Score this position (prefer front-left positions)
+          let score = 100
+          score -= x * 0.5 // Penalize positions further back
+          score -= z * 0.3 // Slightly penalize positions to the right
+
+          // Bonus for positions against edges (stability)
+          if (z === 0 || z + orientation.width >= truck.deckWidth) score += 5
+          if (x === 0) score += 10 // Prefer front
+
+          // Bonus for positions adjacent to other cargo
+          for (const occupied of occupiedAreas) {
+            // Adjacent on x-axis
+            if (Math.abs(x - (occupied.x + occupied.length)) < 0.5 ||
+                Math.abs((x + orientation.length) - occupied.x) < 0.5) {
+              score += 3
+            }
+            // Adjacent on z-axis
+            if (Math.abs(z - (occupied.z + occupied.width)) < 0.5 ||
+                Math.abs((z + orientation.width) - occupied.z) < 0.5) {
+              score += 3
+            }
+          }
+
+          candidates.push({
+            x,
+            z,
+            rotated: orientation.rotated,
+            score
+          })
+        }
+      }
+    }
+  }
+
+  if (candidates.length === 0) {
+    return null
+  }
+
+  // Return best position
+  candidates.sort((a, b) => b.score - a.score)
+  const best = candidates[0]
+
+  return {
+    itemId: item.id,
+    x: best.x,
+    z: best.z,
+    rotated: best.rotated
+  }
+}
+
+/**
+ * Check if an area overlaps with any occupied areas
+ */
+function isAreaOccupied(
+  testArea: { x: number; z: number; length: number; width: number },
+  occupiedAreas: { x: number; z: number; length: number; width: number }[]
+): boolean {
+  for (const occupied of occupiedAreas) {
+    // Check for rectangle overlap with small tolerance
+    const tolerance = 0.01
+    const xOverlap =
+      testArea.x < occupied.x + occupied.length - tolerance &&
+      testArea.x + testArea.length > occupied.x + tolerance
+
+    const zOverlap =
+      testArea.z < occupied.z + occupied.width - tolerance &&
+      testArea.z + testArea.width > occupied.z + tolerance
+
+    if (xOverlap && zOverlap) {
+      return true
+    }
+  }
+
+  return false
 }
 
 /**
@@ -207,6 +370,8 @@ export function planLoads(parsedLoad: ParsedLoad): LoadPlan {
         load.truckScore = newScore
         load.isLegal = newIsLegal
         load.permitsRequired = newPermits
+        // Recalculate placements with new item
+        load.placements = calculatePlacements(load.items, newBestTruck)
 
         added = true
         break
@@ -238,6 +403,7 @@ export function planLoads(parsedLoad: ParsedLoad): LoadPlan {
         weight: item.weight,
         recommendedTruck: bestTruck,
         truckScore: score,
+        placements: calculatePlacements([item], bestTruck),
         permitsRequired: permits,
         warnings: loadWarnings,
         isLegal,
