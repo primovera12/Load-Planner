@@ -830,37 +830,37 @@ function drawTrailerVisualization(
 }
 
 /**
- * Draw a 3D cargo box
+ * Draw a 3D cargo box using jsPDF compatible methods
  */
 function draw3DCargoBox(doc: jsPDF, x: number, y: number, length: number, width: number, height: number, color: string) {
   const r = parseInt(color.slice(1, 3), 16)
   const g = parseInt(color.slice(3, 5), 16)
   const b = parseInt(color.slice(5, 7), 16)
 
-  const topOffset = width * 0.35
+  const topOffset = Math.min(width * 0.35, 15)
 
-  // Front face
+  // Front face (main rectangle)
   doc.setFillColor(r, g, b)
-  doc.setDrawColor(r * 0.6, g * 0.6, b * 0.6)
+  doc.setDrawColor(Math.floor(r * 0.6), Math.floor(g * 0.6), Math.floor(b * 0.6))
   doc.rect(x, y, length, height, 'FD')
 
-  // Top face (lighter)
+  // Top face (lighter) - draw as polygon using lines
   doc.setFillColor(Math.min(r + 40, 255), Math.min(g + 40, 255), Math.min(b + 40, 255))
-  doc.moveTo(x, y)
-  doc.lineTo(x + topOffset, y - topOffset)
-  doc.lineTo(x + length + topOffset, y - topOffset)
-  doc.lineTo(x + length, y)
-  doc.close()
-  doc.fill()
+  const topPoints: [number, number][] = [
+    [topOffset, -topOffset],           // from start to top-left
+    [length, 0],                        // to top-right
+    [-topOffset, topOffset],           // to front-right
+  ]
+  doc.lines(topPoints, x, y, [1, 1], 'F', true)
 
-  // Right face (darker)
-  doc.setFillColor(r * 0.75, g * 0.75, b * 0.75)
-  doc.moveTo(x + length, y)
-  doc.lineTo(x + length + topOffset, y - topOffset)
-  doc.lineTo(x + length + topOffset, y + height - topOffset)
-  doc.lineTo(x + length, y + height)
-  doc.close()
-  doc.fill()
+  // Right face (darker) - draw as polygon using lines
+  doc.setFillColor(Math.floor(r * 0.75), Math.floor(g * 0.75), Math.floor(b * 0.75))
+  const rightPoints: [number, number][] = [
+    [topOffset, -topOffset],           // from front-right to back-right top
+    [0, height],                        // to back-right bottom
+    [-topOffset, topOffset],           // to front-right bottom
+  ]
+  doc.lines(rightPoints, x + length, y, [1, 1], 'F', true)
 }
 
 /**

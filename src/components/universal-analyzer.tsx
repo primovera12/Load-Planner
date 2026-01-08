@@ -634,46 +634,175 @@ To: Dallas, TX"
                   </Button>
                 </div>
 
-                {/* Truck cards */}
-                <div className="space-y-3">
-                  {result.loadPlan.loads.map((load, index) => (
-                    <div
-                      key={load.id}
-                      className="flex items-center justify-between p-4 bg-white rounded-lg border shadow-sm"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-blue-700 font-semibold text-sm">
-                          {index + 1}
+                {/* Truck cards - expanded with item details */}
+                <div className="space-y-4">
+                  {result.loadPlan.loads.map((load, index) => {
+                    const colors = ['#9B59B6', '#1ABC9C', '#3498DB', '#E74C3C', '#F39C12', '#2ECC71']
+                    const utilizationPct = Math.round((load.weight / load.recommendedTruck.maxCargoWeight) * 100)
+                    const totalHeight = load.height + load.recommendedTruck.deckHeight
+
+                    return (
+                      <div
+                        key={load.id}
+                        className="bg-white rounded-lg border shadow-sm overflow-hidden"
+                      >
+                        {/* Header */}
+                        <div className="flex items-center justify-between p-4 bg-slate-50 border-b">
+                          <div className="flex items-center gap-4">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white font-bold">
+                              {index + 1}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-lg">{load.recommendedTruck.name}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {load.items.length} item{load.items.length > 1 ? 's' : ''} • {load.weight.toLocaleString()} lbs ({utilizationPct}% capacity)
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {!load.isLegal && (
+                              <span className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-medium rounded">
+                                OoG - Permits Required
+                              </span>
+                            )}
+                            {load.isLegal && (
+                              <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded flex items-center gap-1">
+                                <CheckCircle2 className="h-3 w-3" />
+                                Legal
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium">{load.recommendedTruck.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {load.items.length} item{load.items.length > 1 ? 's' : ''} • {load.weight.toLocaleString()} lbs
-                          </p>
+
+                        {/* Content */}
+                        <div className="p-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Left: Specs */}
+                            <div className="space-y-3">
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Trailer Specs</p>
+                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                  <div>
+                                    <span className="text-muted-foreground">Deck Length:</span>
+                                    <span className="ml-2 font-medium">{load.recommendedTruck.deckLength}&apos;</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Deck Width:</span>
+                                    <span className="ml-2 font-medium">{load.recommendedTruck.deckWidth}&apos;</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Deck Height:</span>
+                                    <span className="ml-2 font-medium">{load.recommendedTruck.deckHeight}&apos;</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Max Payload:</span>
+                                    <span className="ml-2 font-medium">{load.recommendedTruck.maxCargoWeight.toLocaleString()} lbs</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Load Dimensions</p>
+                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                  <div>
+                                    <span className="text-muted-foreground">Length Used:</span>
+                                    <span className="ml-2 font-medium">{load.length.toFixed(1)}&apos;</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Width Used:</span>
+                                    <span className={`ml-2 font-medium ${load.width > 8.5 ? 'text-amber-600' : ''}`}>
+                                      {load.width.toFixed(1)}&apos;
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Cargo Height:</span>
+                                    <span className="ml-2 font-medium">{load.height.toFixed(1)}&apos;</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Total Height:</span>
+                                    <span className={`ml-2 font-medium ${totalHeight > 13.5 ? 'text-red-600' : ''}`}>
+                                      {totalHeight.toFixed(1)}&apos;
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Permits */}
+                              {load.permitsRequired.length > 0 && (
+                                <div>
+                                  <p className="text-xs font-medium text-amber-600 uppercase tracking-wide mb-2">Permits Required</p>
+                                  <ul className="text-sm text-amber-700 space-y-1">
+                                    {load.permitsRequired.map((permit, i) => (
+                                      <li key={i} className="flex items-start gap-2">
+                                        <FileWarning className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                                        {permit}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Right: Items list */}
+                            <div>
+                              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Cargo Items</p>
+                              <div className="space-y-2 max-h-48 overflow-y-auto">
+                                {load.items.map((item, itemIdx) => (
+                                  <div
+                                    key={item.id}
+                                    className="flex items-center gap-3 p-2 bg-slate-50 rounded text-sm"
+                                  >
+                                    <div
+                                      className="w-4 h-4 rounded flex-shrink-0"
+                                      style={{ backgroundColor: colors[itemIdx % colors.length] }}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="font-medium truncate">{item.description || `Item ${itemIdx + 1}`}</p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {item.length}&apos;L × {item.width}&apos;W × {item.height}&apos;H • {item.weight.toLocaleString()} lbs
+                                        {item.quantity > 1 && ` × ${item.quantity}`}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Mini visualization bar */}
+                          <div className="mt-4 pt-4 border-t">
+                            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Load Preview</p>
+                            <div className="relative h-12 bg-slate-200 rounded-lg overflow-hidden">
+                              {/* Trailer bed */}
+                              <div className="absolute inset-0 flex items-center px-2">
+                                {load.items.map((item, itemIdx) => {
+                                  const widthPct = Math.min((item.length / load.recommendedTruck.deckLength) * 100, 40)
+                                  return (
+                                    <div
+                                      key={item.id}
+                                      className="h-8 rounded mr-1 flex items-center justify-center text-white text-xs font-medium"
+                                      style={{
+                                        backgroundColor: colors[itemIdx % colors.length],
+                                        width: `${Math.max(widthPct, 8)}%`,
+                                        minWidth: '30px'
+                                      }}
+                                    >
+                                      {itemIdx + 1}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                              {/* Wheels */}
+                              <div className="absolute bottom-0 right-2 flex gap-1">
+                                <div className="w-3 h-3 bg-slate-600 rounded-full" />
+                                <div className="w-3 h-3 bg-slate-600 rounded-full" />
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-right text-sm">
-                          <div className="flex items-center gap-1 text-muted-foreground">
-                            <Ruler className="h-3 w-3" />
-                            {load.length.toFixed(1)}&apos;L × {load.width.toFixed(1)}&apos;W × {load.height.toFixed(1)}&apos;H
-                          </div>
-                        </div>
-                        {load.permitsRequired.length > 0 && (
-                          <div className="flex items-center gap-1 text-amber-600">
-                            <FileWarning className="h-4 w-4" />
-                            <span className="text-xs">{load.permitsRequired.length} permit{load.permitsRequired.length > 1 ? 's' : ''}</span>
-                          </div>
-                        )}
-                        {load.isLegal && (
-                          <div className="flex items-center gap-1 text-green-600">
-                            <CheckCircle2 className="h-4 w-4" />
-                            <span className="text-xs">Legal</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
 
                 {/* Warnings */}
