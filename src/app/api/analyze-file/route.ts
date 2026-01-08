@@ -121,8 +121,19 @@ export async function POST(request: NextRequest) {
           for (const sheetName of workbook.SheetNames) {
             const sheet = workbook.Sheets[sheetName]
             const csv = XLSX.utils.sheet_to_csv(sheet)
-            fullText += `Sheet: ${sheetName}\n${csv}\n\n`
+            // Clean up the CSV: remove rows that are mostly empty (metadata rows)
+            const lines = csv.split('\n')
+            const cleanedLines = lines.filter(line => {
+              const cells = line.split(',')
+              const nonEmptyCells = cells.filter(cell => cell.trim() !== '')
+              // Keep rows that have at least 3 non-empty cells (likely data rows)
+              return nonEmptyCells.length >= 3
+            })
+            fullText += `Sheet: ${sheetName}\n${cleanedLines.join('\n')}\n\n`
           }
+
+          // Log what we're sending to AI
+          console.log('Sending to AI (first 1500 chars):', fullText.substring(0, 1500))
 
           const aiResult = await parseTextWithAI(fullText || textForAI)
 
