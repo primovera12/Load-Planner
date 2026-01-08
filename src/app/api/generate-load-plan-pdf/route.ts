@@ -3,17 +3,26 @@ import { generateLoadPlanPDF } from '@/lib/pdf-generator'
 import { LoadPlan, PlannedLoad } from '@/lib/load-planner'
 import { TruckType } from '@/types/truck'
 
-interface ItemDimensions {
+import { LoadItem } from '@/types/load'
+
+interface FrontendItem {
+  id?: string
+  sku?: string
+  description?: string
   length?: number
   width?: number
   height?: number
   weight?: number
+  quantity?: number
+  stackable?: boolean
+  fragile?: boolean
+  hazmat?: boolean
 }
 
 // Frontend format uses 'truck', load-planner uses 'recommendedTruck'
 interface FrontendLoad {
   id: string
-  items: ItemDimensions[]
+  items: FrontendItem[]
   truck: TruckType
   placements?: unknown[]
   utilization?: { weight: number; space: number }
@@ -26,6 +35,23 @@ interface FrontendLoadPlan {
   totalWeight: number
   totalItems: number
   warnings?: string[]
+}
+
+// Transform frontend item to LoadItem with defaults
+function toLoadItem(item: FrontendItem, index: number): LoadItem {
+  return {
+    id: item.id || `item-${index + 1}`,
+    sku: item.sku || `${index + 1}`,
+    description: item.description || `Item ${index + 1}`,
+    length: item.length || 0,
+    width: item.width || 0,
+    height: item.height || 0,
+    weight: item.weight || 0,
+    quantity: item.quantity || 1,
+    stackable: item.stackable ?? false,
+    fragile: item.fragile ?? false,
+    hazmat: item.hazmat ?? false,
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -55,15 +81,23 @@ export async function POST(request: NextRequest) {
         const internalLoad = load as PlannedLoad
 
         const truck = frontendLoad.truck || internalLoad.recommendedTruck
-        const items = load.items as ItemDimensions[]
+
+        if (!truck) {
+          throw new Error(`Load ${load.id} has no truck assigned`)
+        }
+
+        // Transform items to ensure all required properties exist
+        const transformedItems: LoadItem[] = (load.items as FrontendItem[]).map((item, idx) =>
+          toLoadItem(item, idx)
+        )
 
         return {
           id: load.id,
-          items: load.items,
-          length: items.length > 0 ? Math.max(...items.map(i => i.length || 0)) : 0,
-          width: items.length > 0 ? Math.max(...items.map(i => i.width || 0)) : 0,
-          height: items.length > 0 ? Math.max(...items.map(i => i.height || 0)) : 0,
-          weight: items.reduce((sum, i) => sum + (i.weight || 0), 0),
+          items: transformedItems,
+          length: transformedItems.length > 0 ? Math.max(...transformedItems.map(i => i.length)) : 0,
+          width: transformedItems.length > 0 ? Math.max(...transformedItems.map(i => i.width)) : 0,
+          height: transformedItems.length > 0 ? Math.max(...transformedItems.map(i => i.height)) : 0,
+          weight: transformedItems.reduce((sum, i) => sum + (i.weight * i.quantity), 0),
           recommendedTruck: truck,
           truckScore: internalLoad.truckScore || 100,
           placements: frontendLoad.placements || internalLoad.placements || [],
@@ -95,8 +129,11 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('PDF generation error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const errorStack = error instanceof Error ? error.stack : ''
+    console.error('Error details:', { message: errorMessage, stack: errorStack })
     return NextResponse.json(
-      { error: 'Failed to generate PDF' },
+      { error: `Failed to generate PDF: ${errorMessage}` },
       { status: 500 }
     )
   }
