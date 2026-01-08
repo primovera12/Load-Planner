@@ -15,6 +15,7 @@ import {
   FileSpreadsheet,
   Users,
   LogIn,
+  Share2,
 } from 'lucide-react'
 
 // Check if Clerk is properly configured
@@ -50,6 +51,7 @@ const navigation = [
   { name: 'Import', href: '/import', icon: FileSpreadsheet },
   { name: 'Customers', href: '/customers', icon: Users, protected: true },
   { name: 'Quotes', href: '/quotes', icon: FileText, protected: true },
+  { name: 'Shares', href: '/shares', icon: Share2, protected: true },
 ]
 
 export function Navigation() {

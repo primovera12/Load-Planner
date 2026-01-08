@@ -117,12 +117,27 @@ export default function SharePage({ params }: { params: Promise<{ token: string 
     await fetchSharedData(password)
   }
 
+  async function trackAction(action: 'download' | 'print') {
+    try {
+      await fetch(`/api/share/${token}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+    } catch (error) {
+      // Silently fail - don't block the user action
+      console.error('Failed to track action:', error)
+    }
+  }
+
   function handleDownloadPDF() {
     if (!data || data.entityType !== 'QUOTE') return
+    trackAction('download')
     generateQuotePDF(data.entity)
   }
 
   function handlePrint() {
+    trackAction('print')
     window.print()
   }
 

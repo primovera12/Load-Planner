@@ -23,6 +23,8 @@ import {
   Eye,
   EyeOff,
   Zap,
+  Activity,
+  Globe,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -47,6 +49,21 @@ interface ShareLink {
   maxAccessCount: number | null
 }
 
+interface AccessLog {
+  id: string
+  action: string
+  ipAddress: string | null
+  userAgent: string | null
+  createdAt: string
+}
+
+interface AccessStats {
+  totalViews: number
+  totalDownloads: number
+  totalPrints: number
+  lastViewedAt: string | null
+}
+
 export function ShareDialog({ entityType, entityId, entityName, onClose }: ShareDialogProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -55,6 +72,10 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
   const [copied, setCopied] = useState<string | null>(null)
   const [showQR, setShowQR] = useState<string | null>(null)
   const [showEmbed, setShowEmbed] = useState<string | null>(null)
+  const [showLogs, setShowLogs] = useState<string | null>(null)
+  const [accessLogs, setAccessLogs] = useState<AccessLog[]>([])
+  const [accessStats, setAccessStats] = useState<AccessStats | null>(null)
+  const [loadingLogs, setLoadingLogs] = useState(false)
 
   // Settings for new share link
   const [allowDownload, setAllowDownload] = useState(true)
@@ -123,6 +144,27 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
     }
   }
 
+  async function fetchAccessLogs(token: string) {
+    if (showLogs === token) {
+      setShowLogs(null)
+      return
+    }
+    setShowLogs(token)
+    setLoadingLogs(true)
+    try {
+      const response = await fetch(`/api/share/${token}/logs`)
+      if (response.ok) {
+        const data = await response.json()
+        setAccessLogs(data.logs)
+        setAccessStats(data.stats)
+      }
+    } catch (error) {
+      console.error('Error fetching access logs:', error)
+    } finally {
+      setLoadingLogs(false)
+    }
+  }
+
   async function copyToClipboard(text: string) {
     try {
       await navigator.clipboard.writeText(text)
@@ -143,6 +185,29 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
       month: 'short',
       day: 'numeric',
       year: 'numeric',
+    })
+
+  const formatRelativeTime = (dateStr: string) => {
+    const date = new Date(dateStr)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMs / 3600000)
+    const diffDays = Math.floor(diffMs / 86400000)
+
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    if (diffHours < 24) return `${diffHours}h ago`
+    if (diffDays < 7) return `${diffDays}d ago`
+    return formatDate(dateStr)
+  }
+
+  const formatDateTime = (dateStr: string) =>
+    new Date(dateStr).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
     })
 
   if (!isOpen) {
@@ -315,6 +380,15 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                className={cn("h-7 w-7", showLogs === link.token && "bg-blue-100")}
+                                onClick={() => fetchAccessLogs(link.token)}
+                                title="View Access History"
+                              >
+                                <Activity className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 className="h-7 w-7"
                                 onClick={() => window.open(link.shareUrl, '_blank')}
                                 title="Open in new tab"
@@ -394,6 +468,69 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
                               <p className="text-xs text-muted-foreground mt-2">
                                 Paste this code into your website HTML
                               </p>
+                            </div>
+                          )}
+
+                          {/* Access Logs */}
+                          {showLogs === link.token && (
+                            <div className="mt-3 p-3 bg-muted rounded-lg">
+                              <div className="flex items-center justify-between mb-3">
+                                <p className="text-xs font-medium">Access History</p>
+                                {accessStats && (
+                                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                                    <span className="flex items-center gap-1">
+                                      <Eye className="h-3 w-3" /> {accessStats.totalViews}
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <Download className="h-3 w-3" /> {accessStats.totalDownloads}
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <Printer className="h-3 w-3" /> {accessStats.totalPrints}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {loadingLogs ? (
+                                <div className="flex justify-center py-4">
+                                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                                </div>
+                              ) : accessLogs.length > 0 ? (
+                                <div className="space-y-2 max-h-48 overflow-y-auto">
+                                  {accessLogs.map((log) => (
+                                    <div key={log.id} className="flex items-center justify-between text-xs bg-white rounded p-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className={cn(
+                                          "px-1.5 py-0.5 rounded text-[10px] font-medium",
+                                          log.action === 'view' && "bg-blue-100 text-blue-700",
+                                          log.action === 'download' && "bg-green-100 text-green-700",
+                                          log.action === 'print' && "bg-purple-100 text-purple-700"
+                                        )}>
+                                          {log.action}
+                                        </span>
+                                        {log.ipAddress && (
+                                          <span className="flex items-center gap-1 text-muted-foreground">
+                                            <Globe className="h-3 w-3" />
+                                            {log.ipAddress}
+                                          </span>
+                                        )}
+                                        {log.userAgent && (
+                                          <span className="text-muted-foreground">
+                                            {log.userAgent}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <span className="text-muted-foreground">
+                                        {formatRelativeTime(log.createdAt)}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-muted-foreground text-center py-4">
+                                  No access logs yet
+                                </p>
+                              )}
                             </div>
                           )}
 
