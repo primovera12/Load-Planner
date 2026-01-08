@@ -25,7 +25,10 @@
       "Bash(npx prisma generate:*)",
       "Bash(npm uninstall:*)",
       "Bash(npx prisma db push:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(node -e:*)",
+      "Bash(node read-excel.js:*)",
+      "Bash(npm ls:*)"
     ]
   }
 }

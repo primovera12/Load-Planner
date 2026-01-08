@@ -1,73 +1,60 @@
-import { LoadAnalyzer } from '@/components/load-analyzer'
-import { ScanSearch, Zap, Shield, Clock } from 'lucide-react'
+import { UniversalAnalyzer } from '@/components/universal-analyzer'
+import { Sparkles, Upload, FileSpreadsheet, FileText, Image } from 'lucide-react'
 
 export default function AnalyzePage() {
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="mx-auto max-w-6xl">
-        {/* Page Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-              <ScanSearch className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight">Load Analyzer</h1>
-              <p className="text-sm text-muted-foreground">
-                AI-powered freight email parsing and truck recommendations
-              </p>
-            </div>
+      <div className="mx-auto max-w-4xl">
+        {/* Hero Header */}
+        <div className="mb-10 text-center">
+          <div className="inline-flex items-center justify-center p-3 rounded-full bg-gradient-to-r from-primary/20 to-primary/5 mb-4">
+            <Sparkles className="h-8 w-8 text-primary" />
           </div>
-        </div>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight mb-3">
+            Universal Load Analyzer
+          </h1>
+          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+            Upload any file or paste text - we&apos;ll extract cargo dimensions and recommend the perfect truck.
+          </p>
 
-        {/* Quick Stats */}
-        <div className="mb-8 grid grid-cols-3 gap-4">
-          <div className="flex items-center gap-3 rounded-lg border bg-white p-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100">
-              <Zap className="h-5 w-5 text-green-600" />
+          {/* Supported Formats */}
+          <div className="flex flex-wrap justify-center gap-3 mt-6">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-100 text-green-700 text-sm">
+              <FileSpreadsheet className="h-4 w-4" />
+              Excel & CSV
             </div>
-            <div>
-              <div className="text-2xl font-bold">90%+</div>
-              <div className="text-xs text-muted-foreground">Parse Accuracy</div>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-100 text-red-700 text-sm">
+              <FileText className="h-4 w-4" />
+              PDF Documents
             </div>
-          </div>
-          <div className="flex items-center gap-3 rounded-lg border bg-white p-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100">
-              <Clock className="h-5 w-5 text-blue-600" />
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-100 text-blue-700 text-sm">
+              <Image className="h-4 w-4" />
+              Images
             </div>
-            <div>
-              <div className="text-2xl font-bold">&lt;3s</div>
-              <div className="text-xs text-muted-foreground">Response Time</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 rounded-lg border bg-white p-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-purple-100">
-              <Shield className="h-5 w-5 text-purple-600" />
-            </div>
-            <div>
-              <div className="text-2xl font-bold">10</div>
-              <div className="text-xs text-muted-foreground">Trailer Types</div>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-purple-100 text-purple-700 text-sm">
+              <Upload className="h-4 w-4" />
+              Text & Emails
             </div>
           </div>
         </div>
 
         {/* Analyzer Component */}
-        <LoadAnalyzer />
+        <UniversalAnalyzer />
 
         {/* Footer Info */}
-        <div className="mt-8 rounded-lg border bg-white/50 p-4">
-          <div className="flex items-center justify-center gap-8 text-sm text-muted-foreground">
+        <div className="mt-10 rounded-xl border bg-muted/30 p-5">
+          <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
-              <span className="font-medium">Height Limit:</span>
-              <span className="rounded bg-slate-100 px-2 py-0.5 font-mono">13.5&apos;</span>
+              <span className="font-medium text-foreground">Height Limit:</span>
+              <span className="rounded-md bg-white px-2.5 py-1 font-mono shadow-sm border">13.5&apos;</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-medium">Width Limit:</span>
-              <span className="rounded bg-slate-100 px-2 py-0.5 font-mono">8.5&apos;</span>
+              <span className="font-medium text-foreground">Width Limit:</span>
+              <span className="rounded-md bg-white px-2.5 py-1 font-mono shadow-sm border">8.5&apos;</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-medium">GVW Limit:</span>
-              <span className="rounded bg-slate-100 px-2 py-0.5 font-mono">80,000 lbs</span>
+              <span className="font-medium text-foreground">GVW Limit:</span>
+              <span className="rounded-md bg-white px-2.5 py-1 font-mono shadow-sm border">80,000 lbs</span>
             </div>
           </div>
         </div>
