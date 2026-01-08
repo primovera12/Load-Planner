@@ -16,6 +16,7 @@ import {
   Users,
   LogIn,
   Share2,
+  Code,
 } from 'lucide-react'
 
 // Check if Clerk is properly configured
@@ -52,6 +53,7 @@ const navigation = [
   { name: 'Customers', href: '/customers', icon: Users, protected: true },
   { name: 'Quotes', href: '/quotes', icon: FileText, protected: true },
   { name: 'Shares', href: '/shares', icon: Share2, protected: true },
+  { name: 'Developers', href: '/developers', icon: Code, protected: true },
 ]
 
 export function Navigation() {

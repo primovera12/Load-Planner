@@ -32,6 +32,8 @@ model User {
   loads         Load[]
   quotes        Quote[]
   routes        SavedRoute[]
+  apiKeys       ApiKey[]
+  webhooks      Webhook[]
 
   @@map("users")
 }
@@ -380,4 +382,104 @@ model QuoteComment {
 
   @@index([quoteId])
   @@map("quote_comments")
+}
+
+// ============================================
+// API KEYS (Enterprise)
+// ============================================
+
+model ApiKey {
+  id            String    @id @default(cuid())
+  name          String    // Friendly name like "Production" or "Development"
+  key           String    @unique // The actual API key (hashed prefix + random suffix)
+  keyPrefix     String    // First 8 chars for display (e.g., "lp_live_...")
+
+  // Permissions
+  scopes        String[]  // ["loads:read", "loads:write", "quotes:read", etc.]
+
+  // Rate limiting
+  rateLimit     Int       @default(1000)  // Requests per hour
+  requestCount  Int       @default(0)     // Current hour's request count
+  rateLimitReset DateTime?               // When to reset counter
+
+  // Status
+  isActive      Boolean   @default(true)
+  lastUsedAt    DateTime?
+  expiresAt     DateTime?
+
+  // Metadata
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([key])
+  @@index([userId])
+  @@map("api_keys")
+}
+
+// ============================================
+// WEBHOOKS (Enterprise)
+// ============================================
+
+model Webhook {
+  id            String    @id @default(cuid())
+  name          String    // Friendly name
+  url           String    // Endpoint URL
+  secret        String    // Signing secret for verification
+
+  // Events to listen for
+  events        String[]  // ["quote.created", "quote.accepted", "load.created", etc.]
+
+  // Status
+  isActive      Boolean   @default(true)
+
+  // Stats
+  successCount  Int       @default(0)
+  failureCount  Int       @default(0)
+  lastTriggeredAt DateTime?
+  lastSuccessAt   DateTime?
+  lastFailureAt   DateTime?
+
+  // Metadata
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries    WebhookDelivery[]
+
+  @@index([userId])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id            String    @id @default(cuid())
+  webhookId     String
+  webhook       Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  // Event details
+  event         String    // e.g., "quote.created"
+  payload       Json      // The data sent
+
+  // Delivery status
+  status        String    // pending, success, failed
+  statusCode    Int?      // HTTP response code
+  response      String?   // Response body (truncated)
+  error         String?   // Error message if failed
+
+  // Retry info
+  attempts      Int       @default(0)
+  nextRetryAt   DateTime?
+
+  // Timing
+  createdAt     DateTime  @default(now())
+  deliveredAt   DateTime?
+
+  @@index([webhookId])
+  @@index([status])
+  @@map("webhook_deliveries")
 }
