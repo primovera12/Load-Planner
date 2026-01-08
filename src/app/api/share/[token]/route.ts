@@ -80,12 +80,22 @@ export async function GET(
     })
 
     // Update view count and last viewed
+    // Also auto-extend expiration if enabled
+    const updateData: any = {
+      viewCount: { increment: 1 },
+      lastViewedAt: new Date(),
+    }
+
+    // Auto-extend expiration if enabled and share has an expiration
+    if (share.autoExtend && share.expiresAt) {
+      const newExpiresAt = new Date()
+      newExpiresAt.setDate(newExpiresAt.getDate() + (share.extendDays || 7))
+      updateData.expiresAt = newExpiresAt
+    }
+
     await prisma.shareToken.update({
       where: { id: share.id },
-      data: {
-        viewCount: { increment: 1 },
-        lastViewedAt: new Date(),
-      },
+      data: updateData,
     })
 
     // Fetch the entity based on type

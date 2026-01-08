@@ -32,6 +32,8 @@ export async function GET(request: NextRequest) {
       hasPassword: !!share.password,
       password: undefined, // Never expose password hash
       isOneTimeLink: share.maxAccessCount === 1,
+      autoExtend: share.autoExtend,
+      extendDays: share.extendDays,
     }))
 
     return NextResponse.json(transformedShares)
@@ -59,6 +61,8 @@ export async function POST(request: NextRequest) {
       password,
       isOneTimeLink = false,
       maxAccessCount,
+      autoExtend = false,
+      extendDays = 7,
     } = body
 
     // Validate entity type
@@ -116,6 +120,8 @@ export async function POST(request: NextRequest) {
         expiresAt,
         password: hashedPassword,
         maxAccessCount: finalMaxAccessCount,
+        autoExtend: expiresAt ? autoExtend : false, // Only enable if there's an expiration
+        extendDays: extendDays > 0 ? extendDays : 7,
         createdById: user.id,
       },
     })
@@ -130,6 +136,8 @@ export async function POST(request: NextRequest) {
       hasPassword: !!hashedPassword,
       password: undefined, // Never expose password hash
       isOneTimeLink: finalMaxAccessCount === 1,
+      autoExtend: share.autoExtend,
+      extendDays: share.extendDays,
     }, { status: 201 })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

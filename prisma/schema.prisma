@@ -307,6 +307,8 @@ model ShareToken {
 
   // Expiration
   expiresAt     DateTime?
+  autoExtend    Boolean         @default(false)  // Auto-extend when accessed
+  extendDays    Int             @default(7)      // Days to extend by
 
   // Access tracking
   viewCount     Int             @default(0)

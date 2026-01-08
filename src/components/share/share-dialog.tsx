@@ -25,6 +25,8 @@ import {
   Zap,
   Activity,
   Globe,
+  RefreshCw,
+  Mail,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -47,6 +49,8 @@ interface ShareLink {
   hasPassword: boolean
   isOneTimeLink: boolean
   maxAccessCount: number | null
+  autoExtend: boolean
+  extendDays: number
 }
 
 interface AccessLog {
@@ -64,6 +68,55 @@ interface AccessStats {
   lastViewedAt: string | null
 }
 
+// Share presets/templates
+const SHARE_TEMPLATES = {
+  standard: {
+    name: 'Standard',
+    description: 'Full access for 30 days',
+    allowDownload: true,
+    allowPrint: true,
+    expiresInDays: '30',
+    password: '',
+    isOneTimeLink: false,
+    autoExtend: false,
+    extendDays: '7',
+  },
+  secure: {
+    name: 'Secure',
+    description: 'Password protected, 7 days',
+    allowDownload: true,
+    allowPrint: false,
+    expiresInDays: '7',
+    password: '', // User will set password
+    isOneTimeLink: false,
+    autoExtend: false,
+    extendDays: '7',
+    requiresPassword: true,
+  },
+  viewOnly: {
+    name: 'View Only',
+    description: 'No download or print',
+    allowDownload: false,
+    allowPrint: false,
+    expiresInDays: '14',
+    password: '',
+    isOneTimeLink: false,
+    autoExtend: true,
+    extendDays: '7',
+  },
+  oneTime: {
+    name: 'One-Time',
+    description: 'Self-destructs after viewing',
+    allowDownload: true,
+    allowPrint: true,
+    expiresInDays: '',
+    password: '',
+    isOneTimeLink: true,
+    autoExtend: false,
+    extendDays: '7',
+  },
+}
+
 export function ShareDialog({ entityType, entityId, entityName, onClose }: ShareDialogProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -73,6 +126,7 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
   const [showQR, setShowQR] = useState<string | null>(null)
   const [showEmbed, setShowEmbed] = useState<string | null>(null)
   const [showLogs, setShowLogs] = useState<string | null>(null)
+  const [showEmail, setShowEmail] = useState<string | null>(null)
   const [accessLogs, setAccessLogs] = useState<AccessLog[]>([])
   const [accessStats, setAccessStats] = useState<AccessStats | null>(null)
   const [loadingLogs, setLoadingLogs] = useState(false)
@@ -83,6 +137,35 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
   const [expiresInDays, setExpiresInDays] = useState('')
   const [password, setPassword] = useState('')
   const [isOneTimeLink, setIsOneTimeLink] = useState(false)
+  const [autoExtend, setAutoExtend] = useState(false)
+  const [extendDays, setExtendDays] = useState('7')
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
+  const [showPasswordInput, setShowPasswordInput] = useState(false)
+
+  function applyTemplate(templateKey: keyof typeof SHARE_TEMPLATES) {
+    const template = SHARE_TEMPLATES[templateKey]
+    setAllowDownload(template.allowDownload)
+    setAllowPrint(template.allowPrint)
+    setExpiresInDays(template.expiresInDays)
+    setPassword(template.password)
+    setIsOneTimeLink(template.isOneTimeLink)
+    setAutoExtend(template.autoExtend)
+    setExtendDays(template.extendDays)
+    setSelectedTemplate(templateKey)
+    setShowPasswordInput('requiresPassword' in template && template.requiresPassword)
+  }
+
+  function resetForm() {
+    setAllowDownload(true)
+    setAllowPrint(true)
+    setExpiresInDays('')
+    setPassword('')
+    setIsOneTimeLink(false)
+    setAutoExtend(false)
+    setExtendDays('7')
+    setSelectedTemplate(null)
+    setShowPasswordInput(false)
+  }
 
   async function openDialog() {
     setIsOpen(true)
@@ -114,6 +197,8 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
           expiresInDays: expiresInDays || undefined,
           password: password || undefined,
           isOneTimeLink,
+          autoExtend: expiresInDays ? autoExtend : false,
+          extendDays: parseInt(extendDays) || 7,
         }),
       })
 
@@ -210,6 +295,43 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
       minute: '2-digit',
     })
 
+  function generateEmailTemplate(link: ShareLink) {
+    const subject = `${entityType === 'QUOTE' ? 'Quote' : 'Load Details'}: ${entityName}`
+    const expiresText = link.expiresAt
+      ? `\n\nThis link will expire on ${formatDate(link.expiresAt)}.`
+      : ''
+    const passwordText = link.hasPassword
+      ? '\n\nNote: This link is password protected. I will send the password separately.'
+      : ''
+    const actionsText = []
+    if (link.allowDownload) actionsText.push('download')
+    if (link.allowPrint) actionsText.push('print')
+    const actionsLine = actionsText.length > 0
+      ? `\n\nYou can view${actionsText.length > 0 ? `, ${actionsText.join(' and ')}` : ''} the ${entityType.toLowerCase()} using this link.`
+      : ''
+
+    const body = `Hello,
+
+Please find the ${entityType.toLowerCase()} details at the link below:
+
+${link.shareUrl}${actionsLine}${expiresText}${passwordText}
+
+Best regards`
+
+    return { subject, body }
+  }
+
+  function copyEmailTemplate(link: ShareLink) {
+    const { body } = generateEmailTemplate(link)
+    copyToClipboard(body)
+  }
+
+  function openEmailClient(link: ShareLink) {
+    const { subject, body } = generateEmailTemplate(link)
+    const mailtoLink = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    window.open(mailtoLink, '_blank')
+  }
+
   if (!isOpen) {
     return (
       <Button variant="outline" onClick={openDialog} className="gap-2">
@@ -256,7 +378,47 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
               <>
                 {/* Create New Link */}
                 <div className="border rounded-lg p-4 mb-4">
-                  <h3 className="font-medium mb-3">Create Share Link</h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-medium">Create Share Link</h3>
+                    {selectedTemplate && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={resetForm}
+                        className="text-xs text-muted-foreground h-6"
+                      >
+                        Reset
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Quick Templates */}
+                  <div className="mb-4">
+                    <p className="text-xs text-muted-foreground mb-2">Quick presets:</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      {(Object.keys(SHARE_TEMPLATES) as Array<keyof typeof SHARE_TEMPLATES>).map((key) => {
+                        const template = SHARE_TEMPLATES[key]
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => applyTemplate(key)}
+                            className={cn(
+                              "flex flex-col items-center p-2 rounded-lg border text-xs transition-colors",
+                              selectedTemplate === key
+                                ? "border-primary bg-primary/5 text-primary"
+                                : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                            )}
+                          >
+                            <span className="font-medium">{template.name}</span>
+                            <span className="text-[10px] text-muted-foreground mt-0.5">
+                              {template.description.split(',')[0]}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
                   <div className="space-y-3">
                     {/* Permissions */}
                     <div className="flex items-center gap-4">
@@ -296,6 +458,35 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
                       />
                       <span className="text-sm text-muted-foreground">days</span>
                     </div>
+
+                    {/* Auto-Extend (only show if expiration is set) */}
+                    {expiresInDays && (
+                      <div className="ml-6 pl-4 border-l-2 border-gray-200 space-y-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={autoExtend}
+                            onChange={(e) => setAutoExtend(e.target.checked)}
+                            className="rounded"
+                          />
+                          <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">Auto-extend when viewed</span>
+                        </label>
+                        {autoExtend && (
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="text-muted-foreground ml-6">Extend by</span>
+                            <Input
+                              type="number"
+                              value={extendDays}
+                              onChange={(e) => setExtendDays(e.target.value)}
+                              className="w-16 h-7 text-sm"
+                              min="1"
+                            />
+                            <span className="text-muted-foreground">days on each view</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Security Options */}
                     <div className="border-t pt-3 space-y-3">
@@ -376,6 +567,15 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
                                 title="Get Embed Code"
                               >
                                 <Code className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={cn("h-7 w-7", showEmail === link.id && "bg-blue-100")}
+                                onClick={() => setShowEmail(showEmail === link.id ? null : link.id)}
+                                title="Email Template"
+                              >
+                                <Mail className="h-4 w-4" />
                               </Button>
                               <Button
                                 variant="ghost"
@@ -471,6 +671,47 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
                             </div>
                           )}
 
+                          {/* Email Template */}
+                          {showEmail === link.id && (
+                            <div className="mt-3 p-3 bg-muted rounded-lg">
+                              <div className="flex items-center justify-between mb-2">
+                                <p className="text-xs font-medium">Email Template</p>
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-xs gap-1"
+                                    onClick={() => copyEmailTemplate(link)}
+                                  >
+                                    {copied?.includes('Hello') ? (
+                                      <Check className="h-3 w-3" />
+                                    ) : (
+                                      <Copy className="h-3 w-3" />
+                                    )}
+                                    Copy
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-xs gap-1"
+                                    onClick={() => openEmailClient(link)}
+                                  >
+                                    <Mail className="h-3 w-3" />
+                                    Open Email
+                                  </Button>
+                                </div>
+                              </div>
+                              <textarea
+                                readOnly
+                                className="w-full h-32 p-2 text-xs bg-white border rounded resize-none"
+                                value={generateEmailTemplate(link).body}
+                              />
+                              <p className="text-xs text-muted-foreground mt-2">
+                                Copy this template or open in your email client
+                              </p>
+                            </div>
+                          )}
+
                           {/* Access Logs */}
                           {showLogs === link.token && (
                             <div className="mt-3 p-3 bg-muted rounded-lg">
@@ -544,6 +785,11 @@ export function ShareDialog({ entityType, entityId, entityName, onClose }: Share
                             {link.isOneTimeLink && (
                               <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">
                                 <Zap className="h-3 w-3" /> One-time
+                              </span>
+                            )}
+                            {link.autoExtend && (
+                              <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">
+                                <RefreshCw className="h-3 w-3" /> Auto-extend ({link.extendDays}d)
                               </span>
                             )}
                             {link.allowDownload && (
