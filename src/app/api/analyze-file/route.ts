@@ -126,6 +126,14 @@ export async function POST(request: NextRequest) {
 
           const aiResult = await parseTextWithAI(fullText || textForAI)
 
+          // Log AI result for debugging
+          console.log('AI parsing result:', {
+            success: aiResult.success,
+            itemCount: aiResult.items.length,
+            error: aiResult.error,
+            firstItem: aiResult.items[0],
+          })
+
           if (aiResult.success && aiResult.items.length > 0) {
             parseResult = {
               success: true,
@@ -140,7 +148,12 @@ export async function POST(request: NextRequest) {
             }
           } else {
             // AI didn't work, use pattern matching result
+            console.log('AI parsing failed, using pattern matching. AI error:', aiResult.error)
             parseResult = patternResult
+            // Include AI error in metadata for debugging
+            if (parseResult.metadata) {
+              parseResult.metadata.aiError = aiResult.error
+            }
           }
         } else {
           parseResult = patternResult
