@@ -28,7 +28,9 @@
       "Bash(cat:*)",
       "Bash(node -e:*)",
       "Bash(node read-excel.js:*)",
-      "Bash(npm ls:*)"
+      "Bash(npm ls:*)",
+      "Bash(python3:*)",
+      "Bash(cd:*)"
     ]
   }
 }

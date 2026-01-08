@@ -100,11 +100,53 @@ export async function POST(request: NextRequest) {
 
       // Handle different file types
       if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) {
-        // Excel/CSV files
+        // Excel/CSV files - Use AI first for better understanding of varied formats
         const buffer = await file.arrayBuffer()
-        parseResult = parseSpreadsheet(buffer, file.name)
+
+        // First, extract raw text from spreadsheet for AI processing
+        const patternResult = parseSpreadsheet(buffer, file.name)
+
+        // Try AI parsing first (better at understanding varied formats)
+        if (patternResult.rawText || patternResult.items.length > 0) {
+          // Build text representation for AI
+          const textForAI = patternResult.rawText ||
+            patternResult.items.map(item =>
+              `${item.sku || ''} ${item.description} L:${item.length} W:${item.width} H:${item.height} Weight:${item.weight} Qty:${item.quantity}`
+            ).join('\n')
+
+          // Get raw spreadsheet data for AI (re-read with all data)
+          const XLSX = await import('xlsx')
+          const workbook = XLSX.read(buffer, { type: 'array' })
+          let fullText = ''
+          for (const sheetName of workbook.SheetNames) {
+            const sheet = workbook.Sheets[sheetName]
+            const csv = XLSX.utils.sheet_to_csv(sheet)
+            fullText += `Sheet: ${sheetName}\n${csv}\n\n`
+          }
+
+          const aiResult = await parseTextWithAI(fullText || textForAI)
+
+          if (aiResult.success && aiResult.items.length > 0) {
+            parseResult = {
+              success: true,
+              items: aiResult.items,
+              metadata: {
+                fileName: file.name,
+                fileType: fileName.endsWith('.csv') ? 'CSV' : 'Excel',
+                parsedRows: aiResult.items.length,
+                parseMethod: 'AI',
+              },
+              rawText: fullText,
+            }
+          } else {
+            // AI didn't work, use pattern matching result
+            parseResult = patternResult
+          }
+        } else {
+          parseResult = patternResult
+        }
       } else if (fileName.endsWith('.pdf')) {
-        // PDF files - extract text and parse using pdf-parse v2 API
+        // PDF files - extract text and use AI to parse
         try {
           // Dynamic import to avoid serverless compatibility issues
           const { PDFParse } = await import('pdf-parse')
@@ -114,11 +156,32 @@ export async function POST(request: NextRequest) {
           const pdfText = textResult.text || ''
           await pdfParser.destroy()
 
-          parseResult = parsePDFText(pdfText)
-
-          // If PDF parsing found items, great. Otherwise, return raw text for AI
-          if (parseResult.items.length === 0 && pdfText.trim()) {
-            parseResult.rawText = pdfText
+          // Try AI parsing first for PDFs
+          if (pdfText.trim()) {
+            const aiResult = await parseTextWithAI(pdfText)
+            if (aiResult.success && aiResult.items.length > 0) {
+              parseResult = {
+                success: true,
+                items: aiResult.items,
+                metadata: {
+                  fileName: file.name,
+                  fileType: 'PDF',
+                  parsedRows: aiResult.items.length,
+                  parseMethod: 'AI',
+                },
+                rawText: pdfText,
+              }
+            } else {
+              // Fallback to pattern matching
+              parseResult = parsePDFText(pdfText)
+              parseResult.rawText = pdfText
+            }
+          } else {
+            parseResult = {
+              success: false,
+              items: [],
+              error: 'Could not extract text from PDF',
+            }
           }
         } catch (pdfError) {
           console.error('PDF parsing error:', pdfError)
@@ -156,14 +219,44 @@ export async function POST(request: NextRequest) {
           error: aiResult.error,
         }
       } else if (fileName.endsWith('.txt') || fileName.endsWith('.eml')) {
-        // Text files
+        // Text files - use AI first
         const textContent = await file.text()
-        parseResult = parseText(textContent)
+        const aiResult = await parseTextWithAI(textContent)
+        if (aiResult.success && aiResult.items.length > 0) {
+          parseResult = {
+            success: true,
+            items: aiResult.items,
+            metadata: {
+              fileName: file.name,
+              fileType: 'Text',
+              parsedRows: aiResult.items.length,
+              parseMethod: 'AI',
+            },
+            rawText: textContent,
+          }
+        } else {
+          parseResult = parseText(textContent)
+        }
       } else {
         // Try to read as text
         try {
           const textContent = await file.text()
-          parseResult = parseText(textContent)
+          const aiResult = await parseTextWithAI(textContent)
+          if (aiResult.success && aiResult.items.length > 0) {
+            parseResult = {
+              success: true,
+              items: aiResult.items,
+              metadata: {
+                fileName: file.name,
+                fileType: 'Unknown',
+                parsedRows: aiResult.items.length,
+                parseMethod: 'AI',
+              },
+              rawText: textContent,
+            }
+          } else {
+            parseResult = parseText(textContent)
+          }
         } catch {
           return NextResponse.json({
             success: false,
@@ -172,8 +265,22 @@ export async function POST(request: NextRequest) {
         }
       }
     } else if (text) {
-      // Plain text input
-      parseResult = parseText(text)
+      // Plain text input - use AI first
+      const aiResult = await parseTextWithAI(text)
+      if (aiResult.success && aiResult.items.length > 0) {
+        parseResult = {
+          success: true,
+          items: aiResult.items,
+          metadata: {
+            fileType: 'Text',
+            parsedRows: aiResult.items.length,
+            parseMethod: 'AI',
+          },
+          rawText: text,
+        }
+      } else {
+        parseResult = parseText(text)
+      }
     } else {
       return NextResponse.json({
         success: false,

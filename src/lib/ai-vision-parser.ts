@@ -162,7 +162,7 @@ export async function parseImageWithAI(
 
 /**
  * Parse text using AI to extract cargo information
- * Useful for complex or unstructured text that pattern matching can't handle
+ * Handles any format: spreadsheets, tables, emails, documents, etc.
  */
 export async function parseTextWithAI(text: string): Promise<AIParseResult> {
   const ai = getGenAI()
@@ -178,33 +178,58 @@ export async function parseTextWithAI(text: string): Promise<AIParseResult> {
   try {
     const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' })
 
-    const prompt = `You are analyzing text that contains cargo or freight information for load planning.
+    const prompt = `You are an expert at extracting cargo/freight data from ANY format - spreadsheets, tables, packing lists, emails, PDFs, etc.
 
-Extract all cargo items with their dimensions and weights. Look for:
-- Dimensions (L x W x H, Length, Width, Height)
-- Weight information (lbs, kg, tons)
-- Item descriptions/names
-- Quantities
+Your job is to find ALL cargo items with their dimensions and weights, regardless of how the data is formatted.
 
-Return a JSON array with this exact structure:
+LOOK FOR:
+- Item names/descriptions (SKU, Name, Description, Part #, etc.)
+- Dimensions - could be labeled as Length/Width/Height, L/W/H, Dimensions, Size, etc.
+- Weights - could be in lbs, kg, tons, pounds, kilograms
+- Quantities - Qty, Quantity, Count, Pcs, Units
+- The data might have headers explaining units (e.g., "Length dimensions: Inches" or "Weight: Pounds")
+
+UNDERSTAND DIFFERENT FORMATS:
+- CSV/spreadsheet data with columns separated by commas or pipes
+- Tables with headers that might span multiple rows
+- Metadata rows that explain units (e.g., "Inches", "Pounds", "Decimeters")
+- European formats (commas as decimals, different column names)
+- Cargo Planner exports, packing lists, shipping manifests
+
+Return a JSON array with this EXACT structure:
 [
   {
-    "description": "item name",
+    "sku": "item ID if available",
+    "description": "item name or description",
     "quantity": 1,
-    "length": 10.5,  // in feet
-    "width": 8.2,    // in feet
-    "height": 5.0,   // in feet
-    "weight": 15000  // in pounds
+    "length": 10.5,
+    "width": 8.2,
+    "height": 5.0,
+    "weight": 15000,
+    "stackable": true,
+    "priority": 1
   }
 ]
 
-IMPORTANT:
-- Convert ALL dimensions to feet
-- Convert ALL weights to pounds
-- Return ONLY the JSON array
-- If you cannot extract items, return []
+CRITICAL CONVERSION RULES:
+- Convert ALL dimensions to FEET:
+  * Inches → divide by 12
+  * Meters → multiply by 3.28084
+  * Centimeters → divide by 30.48
+  * Decimeters → multiply by 0.328084
+- Convert ALL weights to POUNDS:
+  * Kilograms → multiply by 2.20462
+  * Tons → multiply by 2000
+- Look for unit hints in headers or metadata rows
 
-Text to analyze:
+IMPORTANT:
+- Extract EVERY cargo item you can find
+- If units aren't specified, assume inches for dimensions and pounds for weight
+- Stackable: true if "Yes"/"Y", false if "No"/"N"
+- Return ONLY the JSON array, no explanation
+- If no items found, return []
+
+DATA TO ANALYZE:
 ${text}`
 
     const result = await model.generateContent(prompt)
@@ -219,24 +244,30 @@ ${text}`
       }
 
       const items = JSON.parse(jsonStr) as Array<{
+        sku?: string
         description: string
         quantity: number
         length: number
         width: number
         height: number
         weight: number
+        stackable?: boolean
+        priority?: number
       }>
 
       // Convert to ParsedItem format and validate
       const parsedItems: ParsedItem[] = items
         .map((item, index) => ({
           id: `ai-${Date.now()}-${index}`,
-          description: item.description || `Item ${index + 1}`,
+          sku: item.sku,
+          description: item.description || item.sku || `Item ${index + 1}`,
           quantity: item.quantity || 1,
-          length: item.length || 0,
-          width: item.width || 0,
-          height: item.height || 0,
-          weight: item.weight || 0,
+          length: Math.round((item.length || 0) * 100) / 100,
+          width: Math.round((item.width || 0) * 100) / 100,
+          height: Math.round((item.height || 0) * 100) / 100,
+          weight: Math.round(item.weight || 0),
+          stackable: item.stackable,
+          priority: item.priority,
         }))
         // Filter out empty items (must have at least one dimension or weight)
         .filter(item =>
