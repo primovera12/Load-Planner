@@ -22,7 +22,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate the PDF
-    const pdfBuffer = await generateLoadPlanPDF(loadPlan, options || {})
+    const pdfArrayBuffer = await generateLoadPlanPDF(loadPlan, options || {})
+    // Convert to Buffer for NextResponse
+    const pdfBuffer = Buffer.from(pdfArrayBuffer)
 
     // Return the PDF as a downloadable file
     return new NextResponse(pdfBuffer, {

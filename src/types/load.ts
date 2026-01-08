@@ -130,8 +130,10 @@ export interface AnalyzeResponse {
   success: boolean
   parsedLoad: ParsedLoad
   recommendations: import('./truck').TruckRecommendation[]
+  loadPlan?: import('@/lib/load-planner').LoadPlan
   metadata?: AnalyzeMetadata
   rawText?: string
   error?: string
   warning?: string
+  warnings?: string[]
 }

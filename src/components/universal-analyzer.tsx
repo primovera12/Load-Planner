@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { ParsedLoadDisplay } from './parsed-load-display'
 import { TruckRecommendationList } from './truck-recommendation'
 import { AnalyzeResponse } from '@/types'
@@ -22,8 +24,16 @@ import {
   Sparkles,
   CheckCircle2,
   AlertCircle,
+  Truck,
+  Download,
+  MapPin,
+  Weight,
+  Ruler,
+  FileWarning,
 } from 'lucide-react'
 import { FilePreview } from '@/components/analyze/file-preview'
+import { EditableCargoTable } from '@/components/editable-cargo-table'
+import { LoadItem } from '@/types/load'
 
 const ACCEPTED_TYPES = {
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel',
@@ -58,9 +68,16 @@ export function UniversalAnalyzer() {
   const [file, setFile] = useState<File | null>(null)
   const [textInput, setTextInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isDownloadingPDF, setIsDownloadingPDF] = useState(false)
   const [result, setResult] = useState<AnalyzeResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [inputMode, setInputMode] = useState<'upload' | 'text'>('upload')
+  // Origin/destination state (for when not in parsed data)
+  const [origin, setOrigin] = useState('')
+  const [destination, setDestination] = useState('')
+  const [showLocationPrompt, setShowLocationPrompt] = useState(false)
+  // Editable items state (modified version of parsed items)
+  const [editedItems, setEditedItems] = useState<LoadItem[] | null>(null)
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -135,9 +152,25 @@ export function UniversalAnalyzer() {
       }
 
       setResult(data)
+      // Initialize edited items from parsed result
+      if (data.success && data.parsedLoad?.items) {
+        setEditedItems(data.parsedLoad.items)
+      }
 
       if (data.error && !data.success) {
         setError(data.error)
+      }
+
+      // Check if origin/destination is missing - show prompt
+      if (data.success && data.parsedLoad) {
+        const hasOrigin = data.parsedLoad.origin && data.parsedLoad.origin.trim() !== ''
+        const hasDest = data.parsedLoad.destination && data.parsedLoad.destination.trim() !== ''
+        if (!hasOrigin || !hasDest) {
+          setShowLocationPrompt(true)
+          // Pre-fill if partial data exists
+          if (hasOrigin) setOrigin(data.parsedLoad.origin || '')
+          if (hasDest) setDestination(data.parsedLoad.destination || '')
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
@@ -146,25 +179,78 @@ export function UniversalAnalyzer() {
     }
   }
 
+  // Handle items being edited - this will update the result with new items
+  const handleItemsChange = (newItems: LoadItem[]) => {
+    setEditedItems(newItems)
+    // Note: To recalculate load plan, user would need to re-analyze
+    // For now, we just update the display items
+  }
+
+  // Get the current items (edited or original)
+  const currentItems = editedItems || result?.parsedLoad?.items || []
+
+  const downloadPDF = async () => {
+    if (!result?.loadPlan || result.loadPlan.loads.length === 0) return
+
+    setIsDownloadingPDF(true)
+    try {
+      const response = await fetch('/api/generate-load-plan-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          loadPlan: result.loadPlan,
+          options: {
+            title: 'Load Plan',
+            reference: `LP-${Date.now()}`,
+            date: new Date().toLocaleDateString(),
+            origin: origin || result.parsedLoad?.origin || 'Not specified',
+            destination: destination || result.parsedLoad?.destination || 'Not specified',
+          },
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to generate PDF')
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `load-plan-${Date.now()}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download PDF')
+    } finally {
+      setIsDownloadingPDF(false)
+    }
+  }
+
   const visualizeLoad = () => {
-    if (!result?.parsedLoad || !result.recommendations?.length) return
+    // Use edited items if available, otherwise loadPlan or recommendations
+    const colors = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899']
 
-    const bestRec = result.recommendations.find(r => r.isBestChoice) || result.recommendations[0]
-    const trailerType = bestRec.truck.category.toLowerCase().replace('_', '-') as
-      'flatbed' | 'step-deck' | 'rgn' | 'lowboy' | 'double-drop'
+    // Get trailer type from loadPlan or recommendations
+    let trailerType: 'flatbed' | 'step-deck' | 'rgn' | 'lowboy' | 'double-drop' = 'step-deck'
+    if (result?.loadPlan && result.loadPlan.loads.length > 0) {
+      trailerType = result.loadPlan.loads[0].recommendedTruck.category.toLowerCase().replace('_', '-') as typeof trailerType
+    } else if (result?.recommendations?.length) {
+      const bestRec = result.recommendations.find(r => r.isBestChoice) || result.recommendations[0]
+      trailerType = bestRec.truck.category.toLowerCase().replace('_', '-') as typeof trailerType
+    }
 
-    const cargoItems = result.parsedLoad.items.length > 0
-      ? result.parsedLoad.items.map((item, index) => ({
-          id: `cargo-${Date.now()}-${index}`,
-          name: item.description || `Item ${index + 1}`,
-          width: item.width,
-          height: item.height,
-          length: item.length,
-          weight: item.weight,
-          color: '#3b82f6',
-          position: [0, 0, 0] as [number, number, number],
-        }))
-      : [{
+    // Use edited items, or fall back to loadPlan items, or parsedLoad items
+    const itemsToVisualize = currentItems.length > 0
+      ? currentItems
+      : result?.loadPlan?.loads[0]?.items || result?.parsedLoad?.items || []
+
+    if (itemsToVisualize.length === 0) {
+      // Create single cargo from parsed load summary
+      if (result?.parsedLoad) {
+        const cargoItems = [{
           id: `cargo-${Date.now()}`,
           name: result.parsedLoad.description || 'Cargo',
           width: result.parsedLoad.width,
@@ -175,9 +261,32 @@ export function UniversalAnalyzer() {
           position: [0, 0, 0] as [number, number, number],
         }]
 
+        sessionStorage.setItem('visualize-cargo', JSON.stringify({
+          trailerType,
+          cargo: cargoItems,
+          source: 'analyze',
+        }))
+
+        router.push('/visualize')
+      }
+      return
+    }
+
+    const cargoItems = itemsToVisualize.map((item, index) => ({
+      id: item.id || `cargo-${Date.now()}-${index}`,
+      name: item.description || `Item ${index + 1}`,
+      width: item.width,
+      height: item.height,
+      length: item.length,
+      weight: item.weight,
+      color: item.color || colors[index % colors.length],
+      position: [0, 0, 0] as [number, number, number],
+    }))
+
     sessionStorage.setItem('visualize-cargo', JSON.stringify({
       trailerType,
       cargo: cargoItems,
+      loadPlan: result?.loadPlan,
       source: 'analyze',
     }))
 
@@ -414,7 +523,12 @@ To: Dallas, TX"
             <div className="flex-1">
               <p className="font-medium">Analysis Complete!</p>
               <p className="text-sm text-green-600">
-                Found {result.parsedLoad.items.length || 1} cargo item(s) with {result.recommendations?.length || 0} truck recommendations
+                Found {result.parsedLoad.items.length || 1} cargo item(s)
+                {result.loadPlan && result.loadPlan.totalTrucks > 0 && (
+                  <span className="ml-1">
+                    requiring {result.loadPlan.totalTrucks} truck{result.loadPlan.totalTrucks > 1 ? 's' : ''}
+                  </span>
+                )}
                 {result.metadata?.parseMethod === 'AI' && (
                   <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
                     <Sparkles className="h-3 w-3 mr-1" />
@@ -436,10 +550,163 @@ To: Dallas, TX"
             )}
           </div>
 
+          {/* Origin/Destination Prompt */}
+          {showLocationPrompt && (
+            <Card className="border-amber-200 bg-amber-50">
+              <CardContent className="p-6">
+                <div className="flex items-start gap-3 mb-4">
+                  <MapPin className="h-5 w-5 text-amber-600 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-amber-800">Add Route Information</p>
+                    <p className="text-sm text-amber-600">
+                      Origin and destination weren&apos;t found in the document. Add them for route planning and permits.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="origin" className="text-amber-800">Origin (Pickup)</Label>
+                    <Input
+                      id="origin"
+                      placeholder="e.g., Houston, TX"
+                      value={origin}
+                      onChange={(e) => setOrigin(e.target.value)}
+                      className="bg-white"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="destination" className="text-amber-800">Destination (Delivery)</Label>
+                    <Input
+                      id="destination"
+                      placeholder="e.g., Dallas, TX"
+                      value={destination}
+                      onChange={(e) => setDestination(e.target.value)}
+                      className="bg-white"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowLocationPrompt(false)}
+                  >
+                    Skip for Now
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Load Plan Summary - Multi-truck display */}
+          {result.loadPlan && result.loadPlan.loads.length > 0 && (
+            <Card className="border-blue-200 bg-gradient-to-br from-blue-50 to-white">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100">
+                      <Truck className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-lg">Load Plan</h3>
+                      <p className="text-sm text-muted-foreground">
+                        {result.loadPlan.totalTrucks} truck{result.loadPlan.totalTrucks > 1 ? 's' : ''} • {result.loadPlan.totalWeight.toLocaleString()} lbs total
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={downloadPDF}
+                    disabled={isDownloadingPDF}
+                    variant="outline"
+                    className="gap-2"
+                  >
+                    {isDownloadingPDF ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="h-4 w-4" />
+                        Download PDF
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                {/* Truck cards */}
+                <div className="space-y-3">
+                  {result.loadPlan.loads.map((load, index) => (
+                    <div
+                      key={load.id}
+                      className="flex items-center justify-between p-4 bg-white rounded-lg border shadow-sm"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-blue-700 font-semibold text-sm">
+                          {index + 1}
+                        </div>
+                        <div>
+                          <p className="font-medium">{load.recommendedTruck.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {load.items.length} item{load.items.length > 1 ? 's' : ''} • {load.weight.toLocaleString()} lbs
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right text-sm">
+                          <div className="flex items-center gap-1 text-muted-foreground">
+                            <Ruler className="h-3 w-3" />
+                            {load.length.toFixed(1)}&apos;L × {load.width.toFixed(1)}&apos;W × {load.height.toFixed(1)}&apos;H
+                          </div>
+                        </div>
+                        {load.permitsRequired.length > 0 && (
+                          <div className="flex items-center gap-1 text-amber-600">
+                            <FileWarning className="h-4 w-4" />
+                            <span className="text-xs">{load.permitsRequired.length} permit{load.permitsRequired.length > 1 ? 's' : ''}</span>
+                          </div>
+                        )}
+                        {load.isLegal && (
+                          <div className="flex items-center gap-1 text-green-600">
+                            <CheckCircle2 className="h-4 w-4" />
+                            <span className="text-xs">Legal</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Warnings */}
+                {result.loadPlan.warnings && result.loadPlan.warnings.length > 0 && (
+                  <div className="mt-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
+                    <p className="text-sm font-medium text-amber-800 mb-1">Warnings:</p>
+                    <ul className="text-sm text-amber-700 space-y-1">
+                      {result.loadPlan.warnings.map((warning, i) => (
+                        <li key={i}>• {warning}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Unassigned items */}
+                {result.loadPlan.unassignedItems && result.loadPlan.unassignedItems.length > 0 && (
+                  <div className="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
+                    <p className="text-sm font-medium text-red-800 mb-1">Items requiring special transport:</p>
+                    <ul className="text-sm text-red-700 space-y-1">
+                      {result.loadPlan.unassignedItems.map((item, i) => (
+                        <li key={i}>• {item.description} ({item.length}&apos;L × {item.width}&apos;W × {item.height}&apos;H, {item.weight.toLocaleString()} lbs)</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Action Buttons */}
-          {result.recommendations && result.recommendations.length > 0 && (
+          {((result.recommendations && result.recommendations.length > 0) || (result.loadPlan && result.loadPlan.loads.length > 0)) && (
             <Card className="border-primary/20 bg-gradient-to-r from-primary/5 to-transparent">
-              <CardContent className="flex items-center justify-between py-4">
+              <CardContent className="flex flex-col sm:flex-row items-center justify-between py-4 gap-4">
                 <div className="flex items-center gap-3">
                   <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
                     <Box className="h-6 w-6 text-primary" />
@@ -451,7 +718,7 @@ To: Dallas, TX"
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <Button onClick={planRoute} variant="outline" size="lg">
                     <Route className="mr-2 h-5 w-5" />
                     Plan Route
@@ -463,6 +730,17 @@ To: Dallas, TX"
                 </div>
               </CardContent>
             </Card>
+          )}
+
+          {/* Editable Cargo Items Table */}
+          {currentItems.length > 0 && (
+            <div className="mb-6">
+              <h2 className="mb-4 text-lg font-semibold">Edit Cargo Items</h2>
+              <EditableCargoTable
+                items={currentItems}
+                onItemsChange={handleItemsChange}
+              />
+            </div>
           )}
 
           <div className="grid gap-6 lg:grid-cols-2">
