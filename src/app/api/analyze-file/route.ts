@@ -144,7 +144,6 @@ export async function POST(request: NextRequest) {
                 fileType: fileName.endsWith('.csv') ? 'CSV' : 'Excel',
                 parsedRows: aiResult.items.length,
                 parseMethod: 'AI',
-                aiDebugInfo: aiResult.debugInfo,
               },
               rawText: fullText,
             }
@@ -152,10 +151,6 @@ export async function POST(request: NextRequest) {
             // AI didn't work, use pattern matching result
             console.log('AI parsing failed, using pattern matching. AI error:', aiResult.error)
             parseResult = patternResult
-            // Include AI error in metadata for debugging
-            if (parseResult.metadata) {
-              parseResult.metadata.aiError = aiResult.error
-            }
           }
         } else {
           parseResult = patternResult
