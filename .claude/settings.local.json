@@ -35,7 +35,8 @@
       "Bash(ping:*)",
       "Bash(netstat:*)",
       "Bash(findstr:*)",
-      "Bash(vercel:*)"
+      "Bash(vercel:*)",
+      "Bash(taskkill:*)"
     ]
   }
 }

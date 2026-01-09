@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { generateLoadPlanPDF } from '@/lib/pdf-generator'
 import { LoadPlan, PlannedLoad } from '@/lib/load-planner'
 import { TruckType } from '@/types/truck'
-
+import { LoadCustomer, RouteStop, MultiStopRoute, StatePermitInfo, CostEstimate } from '@/types/route-planning'
 import { LoadItem } from '@/types/load'
 
 interface FrontendItem {
@@ -63,6 +63,11 @@ export async function POST(request: NextRequest) {
         title?: string
         reference?: string
         date?: string
+        customer?: LoadCustomer | null
+        route?: MultiStopRoute | null
+        stops?: RouteStop[]
+        permits?: StatePermitInfo[]
+        costEstimate?: CostEstimate | null
       }
     }
 

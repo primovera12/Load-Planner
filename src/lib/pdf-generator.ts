@@ -1,7 +1,9 @@
 import jsPDF from 'jspdf'
-import 'jspdf-autotable'
+import autoTable from 'jspdf-autotable'
 import { LoadPlan, PlannedLoad } from './load-planner'
 import { LoadItem } from '@/types/load'
+import { LoadCustomer, RouteStop, MultiStopRoute, CostEstimate, StatePermitInfo } from '@/types/route-planning'
+import { fetchStaticMapAsBase64 } from './static-map-generator'
 
 // Extend jsPDF type for autotable
 declare module 'jspdf' {
@@ -319,6 +321,11 @@ interface LoadPlanPDFOptions {
   reference?: string
   companyName?: string
   date?: string
+  customer?: LoadCustomer | null
+  route?: MultiStopRoute | null
+  stops?: RouteStop[]
+  costEstimate?: CostEstimate | null
+  permits?: StatePermitInfo[]
 }
 
 /**
@@ -342,7 +349,38 @@ export async function generateLoadPlanPDF(
   const reference = options.reference || `LP-${Date.now()}`
   const date = options.date || new Date().toLocaleDateString()
 
-  // Page 1: Summary
+  // Try to fetch static map if route is provided
+  let mapImageData: string | null = null
+  if (options.route && options.stops && options.stops.length > 0) {
+    try {
+      mapImageData = await fetchStaticMapAsBase64(
+        options.stops,
+        options.route.polyline,
+        { width: 600, height: 250 }
+      )
+    } catch (error) {
+      console.error('Failed to fetch static map:', error)
+    }
+  }
+
+  // Page 1: Quote Summary with Customer Info
+  await drawQuoteSummaryPage(doc, loadPlan, {
+    title,
+    reference,
+    date,
+    pageWidth,
+    pageHeight,
+    margin,
+    customer: options.customer,
+    route: options.route,
+    stops: options.stops,
+    costEstimate: options.costEstimate,
+    permits: options.permits,
+    mapImage: mapImageData,
+  })
+
+  // Page 2: Load Plan Summary
+  doc.addPage()
   drawLoadPlanSummary(doc, loadPlan, { title, reference, date, pageWidth, pageHeight, margin })
 
   // Subsequent pages: Per-trailer details
@@ -352,6 +390,249 @@ export async function generateLoadPlanPDF(
   })
 
   return doc.output('arraybuffer') as unknown as Uint8Array
+}
+
+/**
+ * Draw the quote summary page with customer info, route map, and costs
+ */
+async function drawQuoteSummaryPage(
+  doc: jsPDF,
+  loadPlan: LoadPlan,
+  opts: {
+    title: string
+    reference: string
+    date: string
+    pageWidth: number
+    pageHeight: number
+    margin: number
+    customer?: LoadCustomer | null
+    route?: MultiStopRoute | null
+    stops?: RouteStop[]
+    costEstimate?: CostEstimate | null
+    permits?: StatePermitInfo[]
+    mapImage?: string | null
+  }
+) {
+  const { title, reference, date, pageWidth, pageHeight, margin, customer, route, stops, costEstimate, permits, mapImage } = opts
+  let y = margin
+
+  // Header
+  doc.setFontSize(24)
+  doc.setFont('helvetica', 'bold')
+  doc.text('Load Planner Quote', margin, y + 20)
+
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  doc.setTextColor(100)
+  doc.text('AI-Powered Freight Solutions', margin, y + 35)
+
+  // Reference and date on the right
+  doc.setTextColor(0)
+  doc.setFontSize(16)
+  doc.setFont('helvetica', 'bold')
+  doc.text(reference, pageWidth - margin, y + 20, { align: 'right' })
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  doc.setTextColor(100)
+  doc.text(`Date: ${date}`, pageWidth - margin, y + 35, { align: 'right' })
+  doc.setTextColor(0)
+
+  y += 55
+
+  // Horizontal line
+  doc.setDrawColor(200)
+  doc.line(margin, y, pageWidth - margin, y)
+  y += 20
+
+  // Customer Info Section
+  if (customer) {
+    doc.setFillColor(248, 250, 252)
+    doc.roundedRect(margin, y, (pageWidth - 2 * margin) / 2 - 10, 100, 5, 5, 'F')
+
+    doc.setFontSize(11)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Bill To:', margin + 10, y + 20)
+    doc.setFont('helvetica', 'normal')
+
+    let customerY = y + 35
+    if (customer.name) {
+      doc.setFontSize(12)
+      doc.setFont('helvetica', 'bold')
+      doc.text(customer.name, margin + 10, customerY)
+      customerY += 15
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+    }
+    if (customer.contactName) {
+      doc.text(customer.contactName, margin + 10, customerY)
+      customerY += 12
+    }
+    if (customer.phone) {
+      doc.text(customer.phone, margin + 10, customerY)
+      customerY += 12
+    }
+    if (customer.email) {
+      doc.text(customer.email, margin + 10, customerY)
+      customerY += 12
+    }
+    if (customer.address) {
+      doc.text(customer.address, margin + 10, customerY)
+      customerY += 12
+    }
+    if (customer.city || customer.state || customer.zipCode) {
+      const cityStateZip = [customer.city, customer.state, customer.zipCode].filter(Boolean).join(', ')
+      doc.text(cityStateZip, margin + 10, customerY)
+    }
+  }
+
+  // Route Summary Section (right side)
+  if (route) {
+    const rightX = pageWidth / 2 + 10
+    doc.setFillColor(248, 250, 252)
+    doc.roundedRect(rightX, y, (pageWidth - 2 * margin) / 2 - 10, 100, 5, 5, 'F')
+
+    doc.setFontSize(11)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Route Summary:', rightX + 10, y + 20)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+
+    let routeY = y + 35
+    doc.text(`Distance: ${route.totalDistance.toFixed(1)} miles`, rightX + 10, routeY)
+    routeY += 15
+    const hours = Math.floor(route.totalDuration / 60)
+    const mins = Math.round(route.totalDuration % 60)
+    doc.text(`Duration: ${hours}h ${mins}m`, rightX + 10, routeY)
+    routeY += 15
+    doc.text(`Stops: ${stops?.length || 0}`, rightX + 10, routeY)
+    routeY += 15
+    if (route.statesTraversed.length > 0) {
+      doc.text(`States: ${route.statesTraversed.join(' → ')}`, rightX + 10, routeY)
+    }
+  }
+
+  y += 115
+
+  // Static Map Image
+  if (mapImage) {
+    try {
+      doc.addImage(mapImage, 'PNG', margin, y, pageWidth - 2 * margin, 180)
+      y += 190
+    } catch (error) {
+      console.error('Failed to add map image to PDF:', error)
+      y += 10
+    }
+  }
+
+  // Cost Estimate Section
+  if (costEstimate) {
+    y += 10
+    doc.setFillColor(240, 253, 244) // Light green background
+    doc.roundedRect(margin, y, pageWidth - 2 * margin, 160, 5, 5, 'F')
+
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Cost Estimate', margin + 15, y + 25)
+
+    // Cost breakdown
+    const colWidth = (pageWidth - 2 * margin - 30) / 2
+    let costY = y + 45
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+
+    // Left column
+    doc.text('Line Haul:', margin + 15, costY)
+    doc.text(formatCurrencyPDF(costEstimate.breakdown.lineHaul), margin + 15 + 100, costY, { align: 'right' })
+    costY += 18
+
+    doc.text('Fuel:', margin + 15, costY)
+    doc.text(formatCurrencyPDF(costEstimate.breakdown.fuel), margin + 15 + 100, costY, { align: 'right' })
+    costY += 18
+
+    doc.text('Permits:', margin + 15, costY)
+    doc.text(formatCurrencyPDF(costEstimate.breakdown.permits), margin + 15 + 100, costY, { align: 'right' })
+    costY += 18
+
+    if (costEstimate.breakdown.escorts > 0) {
+      doc.text('Escorts:', margin + 15, costY)
+      doc.text(formatCurrencyPDF(costEstimate.breakdown.escorts), margin + 15 + 100, costY, { align: 'right' })
+      costY += 18
+    }
+
+    if (costEstimate.breakdown.tolls > 0) {
+      doc.text('Tolls (est.):', margin + 15, costY)
+      doc.text(formatCurrencyPDF(costEstimate.breakdown.tolls), margin + 15 + 100, costY, { align: 'right' })
+    }
+
+    // Total - right side
+    doc.setFillColor(34, 197, 94) // Green
+    doc.roundedRect(pageWidth / 2 + 30, y + 45, colWidth - 15, 60, 5, 5, 'F')
+    doc.setTextColor(255)
+    doc.setFontSize(12)
+    doc.text('Estimated Total', pageWidth / 2 + 45, y + 65)
+    doc.setFontSize(24)
+    doc.setFont('helvetica', 'bold')
+    doc.text(formatCurrencyPDF(costEstimate.total), pageWidth / 2 + 45, y + 92)
+    doc.setTextColor(0)
+    doc.setFont('helvetica', 'normal')
+
+    // Rate per mile
+    doc.setFontSize(10)
+    doc.setTextColor(100)
+    const ratePerMile = costEstimate.total / (route?.totalDistance || 1)
+    doc.text(`${formatCurrencyPDF(ratePerMile)}/mile`, pageWidth / 2 + 45, y + 130)
+    doc.setTextColor(0)
+
+    y += 170
+  }
+
+  // Load Summary
+  y += 10
+  doc.setFontSize(12)
+  doc.setFont('helvetica', 'bold')
+  doc.text('Cargo Summary', margin, y + 15)
+  y += 25
+
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  doc.text(`${loadPlan.totalTrucks} truck${loadPlan.totalTrucks > 1 ? 's' : ''} required`, margin, y + 10)
+  doc.text(`${loadPlan.totalItems} items`, margin + 130, y + 10)
+  doc.text(`${loadPlan.totalWeight.toLocaleString()} lbs total weight`, margin + 230, y + 10)
+
+  // Permit warnings if applicable
+  if (permits && permits.length > 0) {
+    y += 30
+    doc.setFillColor(254, 243, 199) // Yellow background
+    doc.roundedRect(margin, y, pageWidth - 2 * margin, 50, 5, 5, 'F')
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(161, 98, 7)
+    doc.text('Permits Required:', margin + 10, y + 18)
+    doc.setFont('helvetica', 'normal')
+    const permitStates = permits.map(p => p.stateCode).join(', ')
+    doc.text(permitStates, margin + 100, y + 18)
+    const totalPermits = permits.reduce((sum, p) => sum + p.permitFee, 0)
+    const totalEscorts = permits.reduce((sum, p) => sum + p.escortCost, 0)
+    doc.text(`Permit fees: ${formatCurrencyPDF(totalPermits)}  |  Escort costs: ${formatCurrencyPDF(totalEscorts)}`, margin + 10, y + 35)
+    doc.setTextColor(0)
+  }
+
+  // Footer
+  doc.setFontSize(8)
+  doc.setTextColor(150)
+  doc.text('Generated by Load Planner - AI-Powered Freight Solutions', margin, pageHeight - 20)
+  doc.text('Page 1', pageWidth - margin - 30, pageHeight - 20)
+  doc.setTextColor(0)
+}
+
+// Helper function to format currency in PDF
+function formatCurrencyPDF(amount: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount)
 }
 
 /**
@@ -690,7 +971,7 @@ function drawTrailerDetailPage(
   const totalWt = load.items.reduce((sum, item) => sum + item.weight, 0)
   tableData.push(['', '', 'TOTAL', totalQty.toString(), '', '', '', totalWt.toLocaleString(), ''])
 
-  doc.autoTable({
+  autoTable(doc, {
     head: tableHeaders,
     body: tableData,
     startY: y,
