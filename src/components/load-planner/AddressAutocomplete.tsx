@@ -108,7 +108,7 @@ export function AddressAutocomplete({
         // Create autocomplete instance
         autocompleteRef.current = new google.maps.places.Autocomplete(inputRef.current, {
           types: ['address'],
-          componentRestrictions: { country: 'us' },
+          componentRestrictions: { country: ['us', 'ca'] },
           fields: ['place_id', 'formatted_address', 'address_components', 'geometry'],
         })
 
