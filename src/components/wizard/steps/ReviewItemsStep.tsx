@@ -38,6 +38,10 @@ function createEmptyItem(): LoadItem {
     weight: 0,
     stackable: true,
     bottomOnly: false,
+    divisible: false,
+    divisibleBy: 'quantity',
+    minSplitQuantity: 1,
+    minSplitWeight: 1000,
   }
 }
 
@@ -223,13 +227,14 @@ export function ReviewItemsStep() {
                   <TableHead className="text-right">H (ft)</TableHead>
                   <TableHead className="text-right">Weight (lbs)</TableHead>
                   <TableHead className="text-center">Stackable</TableHead>
+                  <TableHead className="text-center" title="Allow splitting across trucks">Divisible</TableHead>
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {state.items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                       No items added yet. Click &quot;Add Item&quot; to get started.
                     </TableCell>
                   </TableRow>
@@ -292,6 +297,15 @@ export function ReviewItemsStep() {
                           onCheckedChange={(checked) =>
                             handleUpdateItem(item.id, 'stackable', checked)
                           }
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Checkbox
+                          checked={item.divisible}
+                          onCheckedChange={(checked) =>
+                            handleUpdateItem(item.id, 'divisible', checked)
+                          }
+                          title="Allow this item to be split across multiple trucks if needed"
                         />
                       </TableCell>
                       <TableCell>

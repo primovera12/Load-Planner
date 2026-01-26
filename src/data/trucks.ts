@@ -23,6 +23,7 @@ export const trucks: TruckType[] = [
     tareWeight: 15000,
     maxLegalCargoHeight: 8.5, // 13.5 - 5.0
     maxLegalCargoWidth: 8.5,
+    commonality: 1, // Very common - most economical and widely available
     features: [
       'Most economical option',
       'Widely available',
@@ -51,6 +52,7 @@ export const trucks: TruckType[] = [
     tareWeight: 16000,
     maxLegalCargoHeight: 8.5,
     maxLegalCargoWidth: 8.5,
+    commonality: 1, // Very common
     features: [
       '5 extra feet of deck space',
       'Good for longer loads',
@@ -77,6 +79,7 @@ export const trucks: TruckType[] = [
     tareWeight: 18000,
     maxLegalCargoHeight: 8.5,
     maxLegalCargoWidth: 8.5,
+    commonality: 3, // Moderate - less common than standard flatbeds
     features: [
       'Extends from 48\' to 80\'+',
       'For extra-long cargo',
@@ -104,6 +107,7 @@ export const trucks: TruckType[] = [
     tareWeight: 7000,
     maxLegalCargoHeight: 10.0,
     maxLegalCargoWidth: 8.5,
+    commonality: 2, // Common - popular for lighter loads
     features: [
       'Quick dispatch',
       'Lower cost than full-size',
@@ -136,6 +140,7 @@ export const trucks: TruckType[] = [
     tareWeight: 16000,
     maxLegalCargoHeight: 10.0, // 13.5 - 3.5
     maxLegalCargoWidth: 8.5,
+    commonality: 2, // Common
     features: [
       'Lower deck height (3.5\' vs 5\')',
       'Drive-on capability with ramps',
@@ -164,6 +169,7 @@ export const trucks: TruckType[] = [
     tareWeight: 17000,
     maxLegalCargoHeight: 10.0,
     maxLegalCargoWidth: 8.5,
+    commonality: 2, // Common
     features: [
       '53\' overall length',
       'Longer lower deck section',
@@ -191,6 +197,7 @@ export const trucks: TruckType[] = [
     tareWeight: 17000,
     maxLegalCargoHeight: 11.0, // 13.5 - 2.5
     maxLegalCargoWidth: 8.5,
+    commonality: 3, // Moderate - less common than standard step deck
     features: [
       'Extra-low deck (2.5\')',
       'Uses low-profile tires',
@@ -218,6 +225,7 @@ export const trucks: TruckType[] = [
     tareWeight: 19000,
     maxLegalCargoHeight: 10.0,
     maxLegalCargoWidth: 8.5,
+    commonality: 3, // Moderate
     features: [
       'Extendable deck',
       'For tall + long cargo',
@@ -250,6 +258,7 @@ export const trucks: TruckType[] = [
     tareWeight: 20000,
     maxLegalCargoHeight: 11.5, // 13.5 - 2.0
     maxLegalCargoWidth: 8.5,
+    commonality: 3, // Moderate
     features: [
       'Very low deck height (2\')',
       'Detachable gooseneck for drive-on loading',
@@ -280,6 +289,7 @@ export const trucks: TruckType[] = [
     tareWeight: 22000,
     maxLegalCargoHeight: 11.5,
     maxLegalCargoWidth: 8.5,
+    commonality: 3, // Moderate
     features: [
       'Extra axle for heavier loads',
       'Same low deck as standard RGN',
@@ -308,6 +318,7 @@ export const trucks: TruckType[] = [
     tareWeight: 26000,
     maxLegalCargoHeight: 11.5,
     maxLegalCargoWidth: 8.5,
+    commonality: 4, // Specialized
     features: [
       '4 axles for maximum weight',
       'Heaviest legal capacity',
@@ -336,6 +347,7 @@ export const trucks: TruckType[] = [
     tareWeight: 24000,
     maxLegalCargoHeight: 11.5,
     maxLegalCargoWidth: 8.5,
+    commonality: 4, // Specialized
     features: [
       'Extendable deck length',
       'Low deck height maintained',
@@ -368,6 +380,7 @@ export const trucks: TruckType[] = [
     tareWeight: 20000,
     maxLegalCargoHeight: 12.0, // 13.5 - 1.5
     maxLegalCargoWidth: 8.5,
+    commonality: 4, // Specialized
     features: [
       'Lowest deck height available (1.5\')',
       'Maximum cargo height clearance',
@@ -397,6 +410,7 @@ export const trucks: TruckType[] = [
     tareWeight: 25000,
     maxLegalCargoHeight: 12.0,
     maxLegalCargoWidth: 8.5,
+    commonality: 4, // Specialized
     features: [
       'Maximum weight capacity',
       'Lowest deck for tallest cargo',
@@ -425,6 +439,7 @@ export const trucks: TruckType[] = [
     tareWeight: 30000,
     maxLegalCargoHeight: 12.0,
     maxLegalCargoWidth: 8.5,
+    commonality: 4, // Specialized
     features: [
       '4 axles for extreme weight',
       'Superload capable',
@@ -453,6 +468,7 @@ export const trucks: TruckType[] = [
     tareWeight: 22000,
     maxLegalCargoHeight: 11.7,
     maxLegalCargoWidth: 8.5,
+    commonality: 4, // Specialized
     features: [
       'Detachable gooseneck',
       'Drive-on loading option',
@@ -481,6 +497,7 @@ export const trucks: TruckType[] = [
     tareWeight: 28000,
     maxLegalCargoHeight: 12.0,
     maxLegalCargoWidth: 8.5,
+    commonality: 5, // Heavy haul - rare
     features: [
       'Extendable deck',
       'Lowest deck height',
@@ -513,6 +530,7 @@ export const trucks: TruckType[] = [
     tareWeight: 18000,
     maxLegalCargoHeight: 11.5,
     maxLegalCargoWidth: 8.5,
+    commonality: 4, // Specialized
     features: [
       'Low center well section',
       'Front and rear decks for smaller items',
@@ -541,6 +559,7 @@ export const trucks: TruckType[] = [
     tareWeight: 21000,
     maxLegalCargoHeight: 11.5,
     maxLegalCargoWidth: 8.5,
+    commonality: 4, // Specialized
     features: [
       'Extendable well section',
       'Low center deck',
@@ -571,6 +590,7 @@ export const trucks: TruckType[] = [
     tareWeight: 18000,
     maxLegalCargoHeight: 11.0, // 13.5 - 2.5
     maxLegalCargoWidth: 8.5,
+    commonality: 3, // Moderate
     features: [
       'Self-loading capability',
       'Tilts to ground level',
@@ -599,6 +619,7 @@ export const trucks: TruckType[] = [
     tareWeight: 17000,
     maxLegalCargoHeight: 8.5,
     maxLegalCargoWidth: 8.5,
+    commonality: 3, // Moderate
     features: [
       'Built-in tarp system',
       'Weather protection',
@@ -627,6 +648,7 @@ export const trucks: TruckType[] = [
     tareWeight: 15000,
     maxLegalCargoHeight: 9.0, // Interior height typically 9\' (110")
     maxLegalCargoWidth: 8.0, // Interior width slightly less
+    commonality: 1, // Very common - most common trailer in US
     features: [
       'Fully enclosed',
       'Weather protection',
@@ -655,6 +677,7 @@ export const trucks: TruckType[] = [
     tareWeight: 17000,
     maxLegalCargoHeight: 8.5, // Slightly less due to refrigeration unit
     maxLegalCargoWidth: 8.0,
+    commonality: 2, // Common
     features: [
       'Temperature controlled',
       'Multi-temp capability',
@@ -683,6 +706,7 @@ export const trucks: TruckType[] = [
     tareWeight: 16000,
     maxLegalCargoHeight: 8.5,
     maxLegalCargoWidth: 8.5,
+    commonality: 2, // Common
     features: [
       'Side curtain walls',
       'Easy side access',
@@ -717,6 +741,8 @@ export const trucks: TruckType[] = [
     tareWeight: 60000,
     maxLegalCargoHeight: 11.0,
     maxLegalCargoWidth: 12.0,
+    commonality: 5, // Heavy haul - requires specialist carrier
+    availabilityNote: 'Requires heavy haul specialist carrier',
     features: [
       '13 axle lines',
       'Extreme weight capacity',
@@ -747,6 +773,8 @@ export const trucks: TruckType[] = [
     tareWeight: 90000,
     maxLegalCargoHeight: 11.0,
     maxLegalCargoWidth: 14.0,
+    commonality: 5, // Heavy haul - very limited availability
+    availabilityNote: 'Very limited availability, long lead time',
     features: [
       '19 axle lines',
       'Maximum weight capacity',
@@ -777,6 +805,8 @@ export const trucks: TruckType[] = [
     tareWeight: 100000,
     maxLegalCargoHeight: 10.5,
     maxLegalCargoWidth: 16.0,
+    commonality: 5, // Heavy haul - extremely rare
+    availabilityNote: 'Extremely rare, requires months of planning',
     features: [
       'Cargo is part of trailer',
       'Extreme weight capacity',
@@ -807,6 +837,8 @@ export const trucks: TruckType[] = [
     tareWeight: 25000,
     maxLegalCargoHeight: 12.5, // Maximum clearance
     maxLegalCargoWidth: 10.0,
+    commonality: 5, // Heavy haul
+    availabilityNote: 'Specialized equipment, limited availability',
     features: [
       'No solid deck',
       'Maximum height clearance',
@@ -836,6 +868,7 @@ export const trucks: TruckType[] = [
     tareWeight: 22000,
     maxLegalCargoHeight: 11.5,
     maxLegalCargoWidth: 8.5,
+    commonality: 4, // Specialized
     features: [
       'Rear axle steering',
       'Better maneuverability',
@@ -863,6 +896,8 @@ export const trucks: TruckType[] = [
     tareWeight: 25000,
     maxLegalCargoHeight: 9.5,
     maxLegalCargoWidth: 8.5,
+    commonality: 5, // Heavy haul - specialized for wind turbines
+    availabilityNote: 'Wind turbine specialists only',
     features: [
       'Blade-specific cradle',
       'Pivoting support',

@@ -48,7 +48,9 @@ export function TruckSelector({
   const canHandle = (truck: TruckType) => {
     const fitsWeight = itemsWeight <= truck.maxCargoWeight
     const fitsLength = maxItemLength <= truck.deckLength
-    const fitsWidth = maxItemWidth <= truck.deckWidth
+    // Use maxLegalCargoWidth for legal width limit validation
+    const maxWidth = truck.maxLegalCargoWidth ?? truck.deckWidth
+    const fitsWidth = maxItemWidth <= maxWidth
     const fitsHeight = maxItemHeight <= truck.maxLegalCargoHeight
 
     return {
@@ -56,7 +58,8 @@ export function TruckSelector({
       fitsWeight,
       fitsLength,
       fitsWidth,
-      fitsHeight
+      fitsHeight,
+      maxWidth
     }
   }
 
@@ -124,7 +127,9 @@ export function TruckSelector({
           <div>
             <div className="font-medium text-gray-900">{currentTruck.name}</div>
             <div className="text-xs text-gray-500">
-              {currentTruck.deckLength}' x {currentTruck.deckWidth}' &bull; {(currentTruck.maxCargoWeight / 1000).toFixed(0)}k lbs max
+              {currentTruck.deckLength}'L x {currentTruck.maxLegalCargoWidth ?? currentTruck.deckWidth}'W x {currentTruck.maxLegalCargoHeight}'H
+              &bull; {(currentTruck.maxCargoWeight / 1000).toFixed(0)}k lbs
+              {currentTruck.tareWeight && <> &bull; Tare: {(currentTruck.tareWeight / 1000).toFixed(0)}k lbs</>}
             </div>
           </div>
         </div>
@@ -136,7 +141,7 @@ export function TruckSelector({
         <div className="mt-2 text-xs text-yellow-700 space-y-0.5">
           {!currentFit.fitsWeight && <div>• Weight exceeds capacity ({(itemsWeight / 1000).toFixed(1)}k lbs &gt; {(currentTruck.maxCargoWeight / 1000).toFixed(0)}k lbs)</div>}
           {!currentFit.fitsLength && <div>• Item too long ({maxItemLength.toFixed(1)}' &gt; {currentTruck.deckLength}')</div>}
-          {!currentFit.fitsWidth && <div>• Item too wide ({maxItemWidth.toFixed(1)}' &gt; {currentTruck.deckWidth}')</div>}
+          {!currentFit.fitsWidth && <div>• Item too wide ({maxItemWidth.toFixed(1)}' &gt; {currentFit.maxWidth}')</div>}
           {!currentFit.fitsHeight && <div>• Item too tall ({maxItemHeight.toFixed(1)}' &gt; {currentTruck.maxLegalCargoHeight}')</div>}
         </div>
       )}
@@ -196,17 +201,18 @@ export function TruckSelector({
                               {truck.name}
                             </div>
                             <div className="text-xs text-gray-500">
-                              {truck.deckLength}' x {truck.deckWidth}' x {truck.maxLegalCargoHeight}'
+                              {truck.deckLength}'L x {truck.maxLegalCargoWidth ?? truck.deckWidth}'W x {truck.maxLegalCargoHeight}'H
                               &bull; {(truck.maxCargoWeight / 1000).toFixed(0)}k lbs
+                              {truck.tareWeight && <> &bull; Tare: {(truck.tareWeight / 1000).toFixed(0)}k</>}
                             </div>
                           </div>
                         </div>
                         {!fit.fits && (
-                          <div className="text-xs text-yellow-600">
-                            {!fit.fitsWeight && 'Weight '}
-                            {!fit.fitsLength && 'Length '}
-                            {!fit.fitsWidth && 'Width '}
-                            {!fit.fitsHeight && 'Height'}
+                          <div className="text-xs text-yellow-600 text-right">
+                            {!fit.fitsWeight && 'Wt '}
+                            {!fit.fitsLength && 'Len '}
+                            {!fit.fitsWidth && 'Wid '}
+                            {!fit.fitsHeight && 'Ht'}
                           </div>
                         )}
                       </button>

@@ -10,6 +10,7 @@ import { CustomerInfoSection } from '@/components/load-planner/CustomerInfoSecti
 import { MultiStopRouteBuilder } from '@/components/load-planner/MultiStopRouteBuilder'
 import { CostEstimatePanel } from '@/components/load-planner/CostEstimatePanel'
 import { LoadItem, TruckType } from '@/types'
+import { replanForNewTruck, PlannedLoad as LibPlannedLoad } from '@/lib/load-planner'
 import { LoadCustomer, RouteStop, MultiStopRoute, StatePermitInfo, CostEstimate } from '@/types/route-planning'
 import { Loader2, FileText, Share2, Download, MapPin, DollarSign } from 'lucide-react'
 
@@ -56,6 +57,12 @@ export default function LoadPlannerPage() {
   const [costEstimate, setCostEstimate] = useState<CostEstimate | null>(null)
   const [activeTab, setActiveTab] = useState<'cargo' | 'route'>('cargo')
 
+  // Split feedback for notifications
+  const [splitFeedback, setSplitFeedback] = useState<{
+    message: string
+    type: 'info' | 'warning'
+  } | null>(null)
+
   const handleFileAnalyzed = useCallback((result: {
     items: LoadItem[]
     loadPlan: LoadPlanResult
@@ -76,16 +83,63 @@ export default function LoadPlannerPage() {
   const handleTruckChange = useCallback((loadIndex: number, newTruck: TruckType) => {
     if (!loadPlan) return
 
+    // Convert LoadPlanResult loads to load-planner format for replanForNewTruck
+    const libLoads: LibPlannedLoad[] = loadPlan.loads.map(load => ({
+      id: load.id,
+      items: load.items,
+      length: Math.max(...load.items.map(i => i.length), 0),
+      width: Math.max(...load.items.map(i => i.width), 0),
+      height: Math.max(...load.items.map(i => i.height), 0),
+      weight: load.items.reduce((sum, i) => sum + i.weight * (i.quantity || 1), 0),
+      recommendedTruck: load.truck,
+      truckScore: 80,
+      placements: load.placements,
+      permitsRequired: [],
+      warnings: load.warnings,
+      isLegal: true,
+    }))
+
+    // Use replanForNewTruck to handle potential splitting
+    const result = replanForNewTruck(libLoads, loadIndex, newTruck)
+
+    // Show feedback if split occurred
+    if (result.splitOccurred) {
+      setSplitFeedback({
+        message: result.splitMessage || `Load split into ${result.loads.length} trucks`,
+        type: 'info'
+      })
+      // Auto-dismiss after 5 seconds
+      setTimeout(() => setSplitFeedback(null), 5000)
+    }
+
+    // Show warning for oversized items
+    if (result.oversizedItems.length > 0) {
+      setSplitFeedback({
+        message: `Warning: ${result.oversizedItems.length} item(s) exceed ${newTruck.name} dimensions`,
+        type: 'warning'
+      })
+    }
+
+    // Convert back to LoadPlanResult format
+    const newLoads: PlannedLoad[] = result.loads.map(load => ({
+      id: load.id,
+      items: load.items,
+      truck: load.recommendedTruck,
+      placements: load.placements,
+      utilization: calculateUtilization(load.items, load.recommendedTruck),
+      warnings: load.warnings,
+    }))
+
     setLoadPlan(prev => {
       if (!prev) return prev
-      const newLoads = [...prev.loads]
-      newLoads[loadIndex] = {
-        ...newLoads[loadIndex],
-        truck: newTruck,
-        // Recalculate utilization
-        utilization: calculateUtilization(newLoads[loadIndex].items, newTruck)
+      return {
+        ...prev,
+        loads: newLoads,
+        totalTrucks: newLoads.length,
+        totalWeight: newLoads.reduce((sum, l) =>
+          sum + l.items.reduce((s, i) => s + i.weight * (i.quantity || 1), 0), 0
+        ),
       }
-      return { ...prev, loads: newLoads }
     })
   }, [loadPlan])
 
@@ -383,6 +437,25 @@ export default function LoadPlannerPage() {
 
             {/* Right Panel - Load Plan Visualization */}
             <div className="lg:col-span-7">
+              {/* Split Feedback Notification */}
+              {splitFeedback && (
+                <div
+                  className={`mb-4 p-4 rounded-lg flex items-center justify-between animate-in slide-in-from-top-2 ${
+                    splitFeedback.type === 'info'
+                      ? 'bg-blue-50 border border-blue-200 text-blue-800'
+                      : 'bg-yellow-50 border border-yellow-200 text-yellow-800'
+                  }`}
+                >
+                  <p className="text-sm font-medium">{splitFeedback.message}</p>
+                  <button
+                    onClick={() => setSplitFeedback(null)}
+                    className="ml-4 text-current opacity-60 hover:opacity-100"
+                  >
+                    &times;
+                  </button>
+                </div>
+              )}
+
               {loadPlan ? (
                 <LoadPlanVisualizer
                   loadPlan={loadPlan}

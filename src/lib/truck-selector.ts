@@ -19,6 +19,8 @@ import {
   PermitType,
   LEGAL_LIMITS,
   SUPERLOAD_THRESHOLDS,
+  COMMONALITY_SCORES,
+  COMMONALITY_LABELS,
   ParsedLoad,
 } from '@/types'
 import { trucks } from '@/data/trucks'
@@ -181,6 +183,23 @@ function calculateScore(
     score += 10
   }
 
+  // Commonality bonus/penalty - prefer common trucks over specialized
+  const commonalityBonus = COMMONALITY_SCORES[truck.commonality] ?? 0
+  score += commonalityBonus
+
+  // Offset commonality penalty for specialized trucks when they're genuinely needed
+  // (e.g., cargo would require permits on a flatbed but is legal on this truck)
+  if (truck.commonality >= 4 && fit.isLegal) {
+    // Check if a standard flatbed would exceed height limit
+    const flatbedTotalHeight = cargo.height + 5.0 // Standard flatbed deck height
+    const flatbedWouldExceed = flatbedTotalHeight > LEGAL_LIMITS.HEIGHT
+
+    if (flatbedWouldExceed) {
+      // This specialized truck allows legal transport - offset the penalty
+      score += 10
+    }
+  }
+
   // Ensure score is within bounds
   return Math.max(0, Math.min(100, Math.round(score)))
 }
@@ -190,6 +209,7 @@ function calculateScore(
  */
 function generateReason(
   truck: TruckType,
+  cargo: ParsedLoad,
   fit: FitAnalysis,
   permits: PermitRequired[]
 ): string {
@@ -201,6 +221,24 @@ function generateReason(
     reasons.push(`Cargo fits but requires ${permits.length} permit(s)`)
   } else {
     reasons.push('Cargo may not fit optimally on this trailer')
+  }
+
+  // Add commonality context
+  if (truck.commonality <= 2) {
+    reasons.push(`${COMMONALITY_LABELS[truck.commonality]} - easy to book`)
+  } else if (truck.commonality >= 4) {
+    const note = truck.availabilityNote || 'may require advance booking'
+    reasons.push(`${COMMONALITY_LABELS[truck.commonality]} - ${note}`)
+
+    // Explain why specialized truck is recommended if it provides a legal advantage
+    if (fit.isLegal) {
+      const flatbedTotalHeight = cargo.height + 5.0
+      if (flatbedTotalHeight > LEGAL_LIMITS.HEIGHT) {
+        reasons.push(
+          `Lower deck needed to stay legal (standard flatbed would be ${flatbedTotalHeight.toFixed(1)}' total)`
+        )
+      }
+    }
   }
 
   // Add deck height context
@@ -276,7 +314,7 @@ export function selectTrucks(cargo: ParsedLoad): TruckRecommendation[] {
     const fit = analyzeFit(cargo, truck)
     const permits = determinePermits(cargo, fit)
     const score = calculateScore(cargo, truck, fit, permits)
-    const reason = generateReason(truck, fit, permits)
+    const reason = generateReason(truck, cargo, fit, permits)
     const warnings = generateWarnings(cargo, truck, fit, permits)
 
     recommendations.push({

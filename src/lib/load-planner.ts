@@ -7,7 +7,7 @@
  * 3. Recommending the best truck type for each load
  */
 
-import { LoadItem, ParsedLoad } from '@/types/load'
+import { LoadItem, ParsedLoad, SplitItemGroup } from '@/types/load'
 import { TruckType, TruckRecommendation } from '@/types/truck'
 import { trucks } from '@/data/trucks'
 import { LEGAL_LIMITS } from '@/types'
@@ -49,6 +49,8 @@ export interface LoadPlan {
   totalItems: number
   // Items that couldn't be assigned (too large for any truck)
   unassignedItems: LoadItem[]
+  // Items that were split across trucks (for reporting)
+  splitItems: SplitItemGroup[]
   // Overall warnings
   warnings: string[]
 }
@@ -378,6 +380,108 @@ function canShareTruck(item1: LoadItem, item2: LoadItem, truck: TruckType): bool
 }
 
 /**
+ * Calculate how to split a divisible item to fit within truck capacity
+ */
+function calculateItemSplits(
+  item: LoadItem,
+  maxWeightPerTruck: number
+): LoadItem[] {
+  const splits: LoadItem[] = []
+
+  if (item.divisibleBy === 'quantity') {
+    // Quantity-based splitting: split multiple units across trucks
+    const totalQuantity = item.quantity || 1
+    const weightPerUnit = item.weight
+    const unitsPerTruck = Math.floor(maxWeightPerTruck / weightPerUnit)
+    const minSplit = item.minSplitQuantity || 1
+
+    if (unitsPerTruck < minSplit) {
+      // Can't even fit minimum split quantity
+      return []
+    }
+
+    let remainingQuantity = totalQuantity
+    let splitIndex = 1
+
+    while (remainingQuantity > 0) {
+      const splitQuantity = Math.min(unitsPerTruck, remainingQuantity)
+
+      // If remaining is below minimum and not the only split, add to last
+      if (splitQuantity < minSplit && splits.length > 0) {
+        const lastSplit = splits[splits.length - 1]
+        lastSplit.quantity += remainingQuantity
+        break
+      }
+
+      splits.push({
+        ...item,
+        id: `${item.id}-split-${splitIndex}`,
+        quantity: splitQuantity,
+        originalItemId: item.id,
+        splitIndex,
+        description: `${item.description} (Part ${splitIndex})`,
+      })
+
+      remainingQuantity -= splitQuantity
+      splitIndex++
+    }
+  } else {
+    // Weight-based splitting: divide bulk weight across trucks
+    const totalWeight = item.weight * (item.quantity || 1)
+    const minSplit = item.minSplitWeight || 1000
+
+    if (maxWeightPerTruck < minSplit) {
+      return [] // Can't fit minimum weight
+    }
+
+    let remainingWeight = totalWeight
+    let splitIndex = 1
+
+    while (remainingWeight > 0) {
+      const splitWeight = Math.min(maxWeightPerTruck, remainingWeight)
+
+      // If remaining is below minimum and not the only split, add to last
+      if (splitWeight < minSplit && splits.length > 0) {
+        const lastSplit = splits[splits.length - 1]
+        lastSplit.weight += remainingWeight
+        break
+      }
+
+      const weightRatio = splitWeight / totalWeight
+
+      splits.push({
+        ...item,
+        id: `${item.id}-split-${splitIndex}`,
+        quantity: 1, // Each split is treated as single unit
+        weight: splitWeight,
+        originalItemId: item.id,
+        splitIndex,
+        description: `${item.description} (Part ${splitIndex} - ${(weightRatio * 100).toFixed(0)}%)`,
+      })
+
+      remainingWeight -= splitWeight
+      splitIndex++
+    }
+  }
+
+  // Update totalSplitParts on all splits
+  splits.forEach(s => {
+    s.totalSplitParts = splits.length
+  })
+
+  return splits
+}
+
+/**
+ * Check if an item needs splitting and can be split
+ */
+function itemNeedsSplitting(item: LoadItem, maxTruckCapacity: number): boolean {
+  if (!item.divisible) return false
+  const itemWeight = item.weight * (item.quantity || 1)
+  return itemWeight > maxTruckCapacity
+}
+
+/**
  * Main load planning function
  * Takes all items and creates an optimal multi-truck plan
  * Uses intelligent distribution to balance loads across trucks
@@ -387,9 +491,47 @@ export function planLoads(parsedLoad: ParsedLoad): LoadPlan {
   const loads: PlannedLoad[] = []
   const unassignedItems: LoadItem[] = []
   const warnings: string[] = []
+  const splitItems: SplitItemGroup[] = []
+
+  // Find max truck capacity for splitting calculations
+  const maxTruckCapacity = Math.max(...trucks.map(t => t.maxCargoWeight))
+
+  // Pre-process: Split divisible items that exceed max truck capacity
+  const processedItems: LoadItem[] = []
+
+  for (const item of items) {
+    const itemWeight = getItemWeight(item)
+
+    if (item.divisible && itemWeight > maxTruckCapacity) {
+      // Item needs splitting
+      const splits = calculateItemSplits(item, maxTruckCapacity)
+
+      if (splits.length > 0) {
+        processedItems.push(...splits)
+        splitItems.push({
+          originalItemId: item.id,
+          originalItem: item,
+          splits,
+          splitType: item.divisibleBy || 'quantity',
+          totalParts: splits.length,
+        })
+        warnings.push(
+          `"${item.description}" was split into ${splits.length} parts across multiple trucks`
+        )
+      } else {
+        // Couldn't split (below minimum thresholds)
+        unassignedItems.push(item)
+        warnings.push(
+          `"${item.description}" could not be split - minimum split size exceeds truck capacity`
+        )
+      }
+    } else {
+      processedItems.push(item)
+    }
+  }
 
   // Sort items by effective weight (weight × quantity, heaviest first)
-  items.sort((a, b) => getItemWeight(b) - getItemWeight(a))
+  processedItems.sort((a, b) => getItemWeight(b) - getItemWeight(a))
 
   // Target utilization for balanced loading (aim for 85% to leave room for optimization)
   const TARGET_UTILIZATION = 85
@@ -397,7 +539,7 @@ export function planLoads(parsedLoad: ParsedLoad): LoadPlan {
   const MAX_UTILIZATION = 100
 
   // Process each item
-  for (const item of items) {
+  for (const item of processedItems) {
     const itemWeight = getItemWeight(item)
 
     // Find the best truck for this individual item
@@ -552,6 +694,7 @@ export function planLoads(parsedLoad: ParsedLoad): LoadPlan {
     totalWeight,
     totalItems,
     unassignedItems,
+    splitItems,
     warnings,
   }
 }
@@ -658,6 +801,128 @@ function findBestTruckForLoad(load: PlannedLoad): { truck: TruckType; score: num
   }
 
   return findBestTruckForItem(virtualItem)
+}
+
+/**
+ * Re-plan loads when truck type changes for a specific load
+ * Returns new loads array with items redistributed as needed
+ */
+export function replanForNewTruck(
+  currentLoads: PlannedLoad[],
+  loadIndex: number,
+  newTruck: TruckType
+): {
+  loads: PlannedLoad[]
+  splitOccurred: boolean
+  splitMessage: string | null
+  oversizedItems: LoadItem[]
+} {
+  // Get items from the changed load
+  const changedLoad = currentLoads[loadIndex]
+  const itemsToReassign = [...changedLoad.items]
+
+  // Check for items that don't fit in the new truck at all
+  const oversizedItems = itemsToReassign.filter(item =>
+    item.length > newTruck.deckLength ||
+    item.width > newTruck.deckWidth ||
+    item.weight > newTruck.maxCargoWeight
+  )
+
+  // Keep other loads unchanged
+  const otherLoads = currentLoads.filter((_, i) => i !== loadIndex)
+
+  // Pack items into trucks of the new type using bin-packing
+  const newLoads = packItemsIntoTrucks(itemsToReassign, newTruck, loadIndex)
+
+  // Calculate if split occurred
+  const splitOccurred = newLoads.length > 1
+  const splitMessage = splitOccurred
+    ? `Load split into ${newLoads.length} trucks due to ${newTruck.name} capacity`
+    : null
+
+  // Combine with other loads and renumber
+  const allLoads = [...otherLoads, ...newLoads]
+  allLoads.forEach((load, idx) => {
+    load.id = `load-${idx + 1}`
+  })
+
+  return {
+    loads: allLoads,
+    splitOccurred,
+    splitMessage,
+    oversizedItems
+  }
+}
+
+/**
+ * Pack items into trucks using first-fit decreasing algorithm
+ */
+function packItemsIntoTrucks(
+  items: LoadItem[],
+  truck: TruckType,
+  startId: number = 0
+): PlannedLoad[] {
+  const loads: PlannedLoad[] = []
+
+  // Sort by weight (heaviest first) for better packing
+  const sortedItems = [...items].sort((a, b) =>
+    getItemWeight(b) - getItemWeight(a)
+  )
+
+  for (const item of sortedItems) {
+    // Try to fit in existing load
+    let placed = false
+    for (const load of loads) {
+      const { canAdd } = canAddItemToLoad(item, load.items, truck, 95)
+      if (canAdd) {
+        load.items.push(item)
+        load.weight = getLoadWeight(load.items)
+        load.length = Math.max(load.length, item.length)
+        load.width = Math.max(load.width, item.width)
+        load.height = Math.max(load.height, item.height)
+        placed = true
+        break
+      }
+    }
+
+    // Create new load if doesn't fit
+    if (!placed) {
+      const itemWeight = getItemWeight(item)
+      const totalHeight = item.height + truck.deckHeight
+      const isLegal = totalHeight <= LEGAL_LIMITS.HEIGHT &&
+                      item.width <= LEGAL_LIMITS.WIDTH
+
+      const loadWarnings: string[] = []
+      if (totalHeight > LEGAL_LIMITS.HEIGHT) {
+        loadWarnings.push(`Total height ${totalHeight.toFixed(1)}' exceeds 13.5' legal limit`)
+      }
+      if (item.width > LEGAL_LIMITS.WIDTH) {
+        loadWarnings.push(`Width ${item.width.toFixed(1)}' exceeds 8.5' legal limit`)
+      }
+
+      loads.push({
+        id: `load-${startId + loads.length + 1}`,
+        items: [item],
+        length: item.length,
+        width: item.width,
+        height: item.height,
+        weight: itemWeight,
+        recommendedTruck: truck,
+        truckScore: 80,
+        placements: calculatePlacements([item], truck),
+        permitsRequired: [],
+        warnings: loadWarnings,
+        isLegal,
+      })
+    }
+  }
+
+  // Recalculate placements for all loads
+  loads.forEach(load => {
+    load.placements = calculatePlacements(load.items, truck)
+  })
+
+  return loads
 }
 
 /**

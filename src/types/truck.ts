@@ -17,6 +17,9 @@ export type TrailerCategory =
   | 'STEERABLE'
   | 'BLADE'
 
+// Commonality tier: 1 = very common, 5 = rare/specialized
+export type CommonalityTier = 1 | 2 | 3 | 4 | 5
+
 export interface TruckType {
   id: string
   name: string
@@ -35,6 +38,9 @@ export interface TruckType {
   // Legal maximums this truck can handle legally (without permits)
   maxLegalCargoHeight: number // 13.5 - deckHeight
   maxLegalCargoWidth: number // 8.5 ft standard
+  // Commonality/availability (1=very common, 5=rare/specialized)
+  commonality: CommonalityTier
+  availabilityNote?: string // e.g., "Requires heavy haul specialist"
   // Features
   features: string[]
   // Best suited for
@@ -110,3 +116,21 @@ export const SUPERLOAD_THRESHOLDS = {
   LENGTH: 120, // feet
   WEIGHT: 200000, // pounds
 } as const
+
+// Commonality scoring: bonus/penalty applied to truck selection score
+export const COMMONALITY_SCORES: Record<CommonalityTier, number> = {
+  1: 15,  // Very Common (Flatbed, Dry Van) - highest bonus
+  2: 10,  // Common (Step Deck, Reefer)
+  3: 5,   // Moderate (RGN, Conestoga, Landoll)
+  4: 0,   // Specialized (Lowboy, Double Drop)
+  5: -5,  // Rare/Heavy Haul (Multi-Axle, Schnabel, Perimeter) - penalty
+}
+
+// Human-readable labels for commonality tiers
+export const COMMONALITY_LABELS: Record<CommonalityTier, string> = {
+  1: 'Very Common',
+  2: 'Common',
+  3: 'Moderate',
+  4: 'Specialized',
+  5: 'Heavy Haul',
+}

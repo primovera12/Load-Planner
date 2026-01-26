@@ -7,6 +7,9 @@ export type ItemGeometry = 'box' | 'cylinder' | 'hollow-cylinder'
 // 1 = Fixed (longship), 3 = Rotatable (default), 63 = Tiltable
 export type OrientationMode = 1 | 3 | 63 | number
 
+// Divisibility type - how an item can be split across trucks
+export type DivisibleBy = 'quantity' | 'weight'
+
 export interface LoadItem {
   id: string
   sku?: string // Item identifier/SKU
@@ -36,6 +39,24 @@ export interface LoadItem {
   fragile?: boolean
   hazmat?: boolean
   notes?: string
+  // Divisibility properties - for splitting across trucks
+  divisible?: boolean // Can this item be split across multiple trucks?
+  divisibleBy?: DivisibleBy // How to divide: 'quantity' (split units) or 'weight' (split bulk)
+  minSplitQuantity?: number // Min units per split when divisibleBy='quantity' (default: 1)
+  minSplitWeight?: number // Min lbs per split when divisibleBy='weight' (default: 1000)
+  // Split tracking - set when item is a split portion of an original
+  originalItemId?: string // Reference to parent item if this is a split portion
+  splitIndex?: number // Which part of the split this is (1, 2, 3...)
+  totalSplitParts?: number // Total number of parts the original was split into
+}
+
+// Track how an item was split for reporting
+export interface SplitItemGroup {
+  originalItemId: string
+  originalItem: LoadItem
+  splits: LoadItem[]
+  splitType: DivisibleBy
+  totalParts: number
 }
 
 export interface ParsedLoad {
